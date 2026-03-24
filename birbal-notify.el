@@ -1,6 +1,6 @@
 ;;; birbal-notify.el --- Modeline indicator, status buffer, alerts  -*- lexical-binding: t -*-
 
-;; Author: Ram Krishnaraj
+;; Author: Ram Raghunathan
 ;; Keywords: tools, ai
 
 ;;; Commentary:

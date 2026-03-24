@@ -1,6 +1,6 @@
 ;;; birbal-session.el --- Session struct, registry, lifecycle, hooks  -*- lexical-binding: t -*-
 
-;; Author: Ram Krishnaraj
+;; Author: Ram Raghunathan
 ;; Keywords: tools, ai
 
 ;;; Commentary:

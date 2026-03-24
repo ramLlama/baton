@@ -1,6 +1,6 @@
 ;;; birbal-process.el --- vterm spawning, output watching, input sending  -*- lexical-binding: t -*-
 
-;; Author: Ram Krishnaraj
+;; Author: Ram Raghunathan
 ;; Keywords: tools, ai
 
 ;;; Commentary:

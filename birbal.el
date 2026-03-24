@@ -1,10 +1,10 @@
 ;;; birbal.el --- Manage multiple AI coding agents from Emacs  -*- lexical-binding: t -*-
 
-;; Author: Ram Krishnaraj
+;; Author: Ram Raghunathan
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1") (vterm "0.0.2"))
 ;; Keywords: tools, ai
-;; URL: https://github.com/ramkrishnaraj/birbal
+;; URL: https://github.com/ramraghunathan/birbal
 
 ;;; Commentary:
 ;; Birbal is an Emacs package for managing multiple AI coding agents (Claude Code,
