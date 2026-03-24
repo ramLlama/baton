@@ -22,7 +22,7 @@
 (declare-function monet-make-open-diff-handler "monet" (diff-fn))
 (declare-function monet-make-tool "monet" (&rest plist))
 (declare-function monet-enable-tool-set "monet" (&rest sets))
-(declare-function monet-simple-diff-tool "monet"
+(declare-function monet-ediff-tool "monet"
                   (old-file new-file new-contents on-accept on-quit &optional session))
 (defvar monet-open-diff-tool-schema)
 
@@ -56,7 +56,7 @@ PARAMS and MONET-SESSION are the standard MCP handler arguments."
                     (birbal-session-set-status birbal-session 'running))))
          (diff-fn
           (lambda (old new contents on-accept on-quit sess)
-            (monet-simple-diff-tool
+            (monet-ediff-tool
              old new contents
              (lambda (&rest args) (apply on-accept args) (funcall reset))
              (lambda () (funcall on-quit) (funcall reset))
