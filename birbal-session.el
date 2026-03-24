@@ -133,8 +133,9 @@ Fires `birbal-session-killed-hook'."
     ;; Kill the vterm buffer if alive
     (when-let* ((buf (birbal--session-buffer session)))
       (when (buffer-live-p buf)
+        (with-current-buffer buf
+          (set-buffer-modified-p nil))
         (let ((kill-buffer-query-functions nil))
-          (set-buffer-modified-p nil)
           (kill-buffer buf))))
     ;; Remove from registry
     (remhash id birbal--sessions)

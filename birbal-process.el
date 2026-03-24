@@ -59,6 +59,8 @@ list (space-prefixed name) and the session's buffer slot is updated."
       (setq-local birbal--current-session session)
       ;; Reset to running when the user types
       (add-hook 'pre-command-hook #'birbal-process--on-input nil t)
+      ;; Remove session from registry if the buffer is killed externally
+      (add-hook 'kill-buffer-hook #'birbal-process--on-buffer-killed nil t)
       (vterm-send-string (concat command "\n")))
     ;; Initialize watcher metadata
     (let ((now (float-time)))
@@ -88,15 +90,39 @@ Resets session status to running."
 
 ;;; Input Detection
 
+(defun birbal-process--on-buffer-killed ()
+  "Handle external kill of a session's vterm buffer.
+Called from `kill-buffer-hook' in the vterm buffer.  Cancels the watcher
+timer and removes the session from the registry without trying to kill
+the buffer again (it is already being killed)."
+  (when birbal--current-session
+    (let* ((session birbal--current-session)
+           (id (birbal--session-id session)))
+      ;; Cancel watcher timer
+      (when-let* ((timer (plist-get (birbal--session-metadata session) :watcher-timer)))
+        (cancel-timer timer))
+      ;; Remove from registry and fire hook (buffer is already dying, skip kill-buffer)
+      (remhash id birbal--sessions)
+      (run-hook-with-args 'birbal-session-killed-hook session))))
+
 (defun birbal-process--reset-to-running (session)
   "Reset SESSION to `running' status if it is currently `waiting'."
   (when (eq (birbal--session-status session) 'waiting)
     (birbal-session-set-status session 'running)))
 
+(defconst birbal-process--input-commands
+  '(vterm--self-insert vterm-send-key vterm-send-return vterm-send-string
+    vterm-send-backspace vterm-send-tab vterm-send-up vterm-send-down
+    vterm-send-left vterm-send-right vterm-send-ctrl-c vterm-send-ctrl-d
+    vterm-send-ctrl-z vterm-send-escape vterm-send-meta-backspace)
+  "vterm commands that count as user input for status-reset purposes.")
+
 (defun birbal-process--on-input ()
-  "Reset the current buffer's birbal session to running on user input."
+  "Reset session to `running' when the user sends actual input to the vterm.
+Guards against false positives from scrolling and other non-input commands."
   (when (and birbal--current-session
-             (eq (birbal--session-status birbal--current-session) 'waiting))
+             (eq (birbal--session-status birbal--current-session) 'waiting)
+             (memq this-command birbal-process--input-commands))
     (birbal-session-set-status birbal--current-session 'running)))
 
 ;;; Output Watcher

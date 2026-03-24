@@ -61,10 +61,11 @@ DONE-PATTERNS is a list of regexps signalling session completion."
  :command "claude"
  :args '()
  :waiting-patterns
+ ;; Patterns are matched against the last 250 lines — keep them specific.
  '(("╭─" . "input prompt")
-   ("Allow" . "permission prompt")
-   ("Do you want" . "confirmation")
-   ("Y/n" . "confirmation"))
+   ("Allow.*tool\\|Allow.*command\\|Bash.*Allow" . "permission prompt")
+   ("Do you want to\\|Would you like to" . "confirmation")
+   ("\\[Y/n\\]\\|\\[y/N\\]" . "confirmation"))
  :done-patterns '("Session ended" "Goodbye"))
 
 (birbal-define-agent-type
@@ -102,7 +103,13 @@ DIRECTORY is the working directory for the session."
          (def (gethash agent-type birbal-agent-types)))
     (unless def
       (error "Unknown agent type: %s" agent-type-name))
-    (let* ((command (plist-get def :command))
+    (let* ((args (plist-get def :args))
+           (command (if args
+                        (mapconcat #'identity
+                                   (cons (plist-get def :command)
+                                         (mapcar #'shell-quote-argument args))
+                                   " ")
+                      (plist-get def :command)))
            (session (birbal-session-create
                      :agent-type agent-type
                      :command command

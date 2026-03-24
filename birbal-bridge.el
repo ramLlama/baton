@@ -75,9 +75,12 @@ PARAMS and MONET-SESSION are passed through to the underlying handler."
 
 (defun birbal-bridge--call-with-wrapped-callbacks (params monet-session birbal-session)
   "Call monet diff handler, resetting BIRBAL-SESSION to running after accept/quit.
-PARAMS and MONET-SESSION are forwarded to the underlying handler."
-  ;; We temporarily advise monet-simple-diff-tool so that the on-accept and
-  ;; on-quit lambdas it receives each reset the birbal session.
+PARAMS and MONET-SESSION are forwarded to the underlying handler.
+
+Uses `cl-letf' to intercept the on-accept/on-quit lambdas that
+`monet--make-open-diff-handler' passes to `monet-simple-diff-tool'.
+This relies on `monet-simple-diff-tool' being called *synchronously* within
+the dynamic extent of the handler — which is the case as of monet 0.0.3."
   (let (orig-fn)
     (setq orig-fn
           (symbol-function 'monet-simple-diff-tool))
