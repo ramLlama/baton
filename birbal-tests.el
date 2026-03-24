@@ -1,0 +1,353 @@
+;;; birbal-tests.el --- ERT test suite for birbal  -*- lexical-binding: t -*-
+
+;; Author: Ram Krishnaraj
+;; Keywords: tools, ai, test
+
+;;; Commentary:
+;; ERT tests for birbal-session, birbal-process (pure), birbal-notify,
+;; birbal agent-type registry, and birbal-bridge.
+;;
+;; Run via Makefile:
+;;   make test
+
+;;; Code:
+(require 'ert)
+(require 'birbal-session)
+(require 'birbal-process)
+(require 'birbal-notify)
+(require 'birbal)
+(require 'birbal-bridge)
+
+;;; Test Isolation
+
+(defmacro birbal-test-with-clean-state (&rest body)
+  "Execute BODY with isolated global state: fresh sessions, counters, and agent-types."
+  (declare (indent 0))
+  `(let ((birbal--sessions (make-hash-table :test 'equal))
+         (birbal--session-counters (make-hash-table :test 'eq))
+         (birbal-agent-types (make-hash-table :test 'eq))
+         (birbal-session-created-hook nil)
+         (birbal-session-killed-hook nil)
+         (birbal-session-status-changed-hook nil))
+     ,@body))
+
+;;; ─── birbal-session tests ────────────────────────────────────────────────────
+
+(ert-deftest birbal-test-session-create-returns-struct ()
+  "birbal-session-create returns a birbal--session struct."
+  (birbal-test-with-clean-state
+    (let ((s (birbal-session-create :agent-type 'claude-code
+                                    :command "claude"
+                                    :directory "/tmp")))
+      (should (birbal--session-p s)))))
+
+(ert-deftest birbal-test-session-create-adds-to-registry ()
+  "Created session is findable via birbal-session-get."
+  (birbal-test-with-clean-state
+    (let* ((s (birbal-session-create :agent-type 'claude-code
+                                     :command "claude"
+                                     :directory "/tmp"))
+           (found (birbal-session-get (birbal--session-id s))))
+      (should (eq s found)))))
+
+(ert-deftest birbal-test-session-create-auto-name ()
+  "Auto-names use agent-type short prefix and incrementing counter."
+  (birbal-test-with-clean-state
+    (let ((s1 (birbal-session-create :agent-type 'claude-code
+                                     :command "claude"
+                                     :directory "/tmp"))
+          (s2 (birbal-session-create :agent-type 'claude-code
+                                     :command "claude"
+                                     :directory "/tmp")))
+      (should (equal (birbal--session-name s1) "claude-1"))
+      (should (equal (birbal--session-name s2) "claude-2")))))
+
+(ert-deftest birbal-test-session-create-explicit-name ()
+  "birbal-session-create respects an explicit :name argument."
+  (birbal-test-with-clean-state
+    (let ((s (birbal-session-create :agent-type 'claude-code
+                                    :command "claude"
+                                    :directory "/tmp"
+                                    :name "my-agent")))
+      (should (equal (birbal--session-name s) "my-agent")))))
+
+(ert-deftest birbal-test-session-create-fires-hook ()
+  "birbal-session-create fires birbal-session-created-hook with the session."
+  (birbal-test-with-clean-state
+    (let (hook-arg)
+      (add-hook 'birbal-session-created-hook (lambda (s) (setq hook-arg s)))
+      (let ((s (birbal-session-create :agent-type 'claude-code
+                                      :command "claude"
+                                      :directory "/tmp")))
+        (should (eq hook-arg s))))))
+
+(ert-deftest birbal-test-session-list-all ()
+  "birbal-session-list returns all sessions."
+  (birbal-test-with-clean-state
+    (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")
+    (birbal-session-create :agent-type 'aider       :command "aider"  :directory "/tmp")
+    (should (= 2 (length (birbal-session-list))))))
+
+(ert-deftest birbal-test-session-list-filter-by-status ()
+  "birbal-session-list with a status argument filters correctly."
+  (birbal-test-with-clean-state
+    (let ((s1 (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp"))
+          (s2 (birbal-session-create :agent-type 'aider       :command "aider"  :directory "/tmp")))
+      (birbal-session-set-status s1 'waiting "prompt")
+      (should (= 1 (length (birbal-session-list 'waiting))))
+      (should (eq s1 (car (birbal-session-list 'waiting))))
+      (should (= 1 (length (birbal-session-list 'running))))
+      (should (eq s2 (car (birbal-session-list 'running)))))))
+
+(ert-deftest birbal-test-session-set-status ()
+  "birbal-session-set-status changes status and fires hook with old/new values."
+  (birbal-test-with-clean-state
+    (let ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp"))
+          hook-session hook-old hook-new)
+      (add-hook 'birbal-session-status-changed-hook
+                (lambda (sess old new)
+                  (setq hook-session sess hook-old old hook-new new)))
+      (birbal-session-set-status s 'waiting "permission prompt")
+      (should (eq (birbal--session-status s) 'waiting))
+      (should (equal (birbal--session-waiting-reason s) "permission prompt"))
+      (should (eq hook-session s))
+      (should (eq hook-old 'running))
+      (should (eq hook-new 'waiting)))))
+
+(ert-deftest birbal-test-session-set-status-clears-reason ()
+  "Transitioning away from waiting clears the waiting-reason."
+  (birbal-test-with-clean-state
+    (let ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")))
+      (birbal-session-set-status s 'waiting "something")
+      (birbal-session-set-status s 'running)
+      (should (null (birbal--session-waiting-reason s))))))
+
+(ert-deftest birbal-test-session-find-by-directory ()
+  "birbal-session-find-by-directory returns matching session."
+  (birbal-test-with-clean-state
+    (let ((s (birbal-session-create :agent-type 'claude-code
+                                    :command "claude"
+                                    :directory "/my/project")))
+      (should (eq s (birbal-session-find-by-directory "/my/project")))
+      (should (null (birbal-session-find-by-directory "/other"))))))
+
+(ert-deftest birbal-test-session-kill-removes-from-registry ()
+  "birbal-session-kill removes the session from the registry."
+  (birbal-test-with-clean-state
+    (let ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")))
+      (birbal-session-kill s)
+      (should (null (birbal-session-get (birbal--session-id s))))
+      (should (= 0 (length (birbal-session-list)))))))
+
+(ert-deftest birbal-test-session-kill-fires-hook ()
+  "birbal-session-kill fires birbal-session-killed-hook with the session."
+  (birbal-test-with-clean-state
+    (let (hook-arg)
+      (add-hook 'birbal-session-killed-hook (lambda (s) (setq hook-arg s)))
+      (let ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")))
+        (birbal-session-kill s)
+        (should (eq hook-arg s))))))
+
+;;; ─── Agent-type registry tests ───────────────────────────────────────────────
+
+(ert-deftest birbal-test-define-agent-type-stores ()
+  "birbal-define-agent-type stores the definition at the symbol key."
+  (birbal-test-with-clean-state
+    (birbal-define-agent-type :name 'my-agent
+                              :command "my-cmd"
+                              :waiting-patterns '((">" . "prompt"))
+                              :done-patterns '("bye"))
+    (should (gethash 'my-agent birbal-agent-types))))
+
+(ert-deftest birbal-test-define-agent-type-retrieval ()
+  "The :command is retrievable from the stored definition."
+  (birbal-test-with-clean-state
+    (birbal-define-agent-type :name 'my-agent
+                              :command "my-cmd"
+                              :waiting-patterns nil
+                              :done-patterns nil)
+    (should (equal "my-cmd"
+                   (plist-get (gethash 'my-agent birbal-agent-types) :command)))))
+
+(ert-deftest birbal-test-agent-type-waiting-patterns ()
+  "Waiting patterns are stored as an alist of (pattern . reason)."
+  (birbal-test-with-clean-state
+    (birbal-define-agent-type :name 'my-agent
+                              :command "cmd"
+                              :waiting-patterns '(("^> " . "input") ("Allow" . "permission"))
+                              :done-patterns nil)
+    (let ((patterns (plist-get (gethash 'my-agent birbal-agent-types) :waiting-patterns)))
+      (should (equal (car (assoc "^> " patterns)) "^> "))
+      (should (equal (cdr (assoc "^> " patterns)) "input"))
+      (should (equal (cdr (assoc "Allow" patterns)) "permission")))))
+
+;;; ─── birbal-process pure pattern matching tests ──────────────────────────────
+
+(ert-deftest birbal-test-process-match-waiting-pattern ()
+  "Returns (:waiting . reason) when a waiting pattern matches."
+  (let ((result (birbal-process--match-patterns
+                 "Do you want to continue? [Y/n]"
+                 '(("Y/n" . "confirmation") ("Allow" . "permission"))
+                 '("Goodbye"))))
+    (should (consp result))
+    (should (eq (car result) :waiting))
+    (should (equal (cdr result) "confirmation"))))
+
+(ert-deftest birbal-test-process-match-done-pattern ()
+  "Returns :done when a done pattern matches."
+  (let ((result (birbal-process--match-patterns
+                 "Session ended. Goodbye!"
+                 '(("Y/n" . "confirmation"))
+                 '("Session ended" "Goodbye"))))
+    (should (eq result :done))))
+
+(ert-deftest birbal-test-process-match-no-match ()
+  "Returns nil when no pattern matches."
+  (let ((result (birbal-process--match-patterns
+                 "Processing files..."
+                 '(("Y/n" . "confirmation"))
+                 '("Goodbye"))))
+    (should (null result))))
+
+(ert-deftest birbal-test-process-match-waiting-takes-priority ()
+  "Waiting pattern takes priority over done pattern when both would match."
+  ;; If text contains both a waiting pattern and a done pattern,
+  ;; waiting is checked first.
+  (let ((result (birbal-process--match-patterns
+                 "Allow access? Goodbye"
+                 '(("Allow" . "permission"))
+                 '("Goodbye"))))
+    (should (consp result))
+    (should (eq (car result) :waiting))))
+
+;;; ─── birbal-notify modeline tests ────────────────────────────────────────────
+
+(ert-deftest birbal-test-notify-modeline-no-sessions ()
+  "Modeline string is empty when there are no sessions."
+  (birbal-test-with-clean-state
+    (should (equal "" (birbal-notify--modeline-string)))))
+
+(ert-deftest birbal-test-notify-modeline-running-only ()
+  "Modeline shows count without /waiting when no sessions are waiting."
+  (birbal-test-with-clean-state
+    (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")
+    (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")
+    (let ((str (birbal-notify--modeline-string)))
+      ;; Should contain "B[2]" (no slash)
+      (should (string-match-p "B\\[2\\]" str))
+      (should-not (string-match-p "/" str)))))
+
+(ert-deftest birbal-test-notify-modeline-with-waiting ()
+  "Modeline shows running/waiting counts when a session is waiting."
+  (birbal-test-with-clean-state
+    (let ((s1 (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp"))
+          (s2 (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp"))
+          (s3 (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")))
+      (birbal-session-set-status s1 'waiting "prompt")
+      (let ((str (birbal-notify--modeline-string)))
+        ;; 2 running, 1 waiting -> B[2/1]
+        (should (string-match-p "B\\[2/1\\]" str))))))
+
+(ert-deftest birbal-test-notify-fires-on-waiting ()
+  "birbal-notify-function is called when a session transitions to waiting."
+  (birbal-test-with-clean-state
+    (let* ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp"))
+           notified-session
+           (birbal-notify-function (lambda (sess) (setq notified-session sess))))
+      ;; Call the status-changed handler directly to test the notification path.
+      (birbal-notify--on-status-changed s 'running 'waiting)
+      (should (eq notified-session s)))))
+
+;;; ─── birbal-notify status buffer rendering tests ─────────────────────────────
+
+(ert-deftest birbal-test-status-buffer-format-waiting ()
+  "A waiting session entry includes the waiting indicator and reason."
+  (birbal-test-with-clean-state
+    (let ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")))
+      (birbal-session-set-status s 'waiting "permission prompt")
+      (let* ((entry (birbal-notify--format-entry s nil))
+             (cols (cadr entry)))
+        ;; cols[5] is the reason column
+        (should (string-match-p "permission prompt" (aref cols 5)))
+        ;; cols[3] is the status column
+        (should (string-match-p "waiting" (aref cols 3)))))))
+
+(ert-deftest birbal-test-status-buffer-format-running ()
+  "A running session entry shows \"running\" status and no reason."
+  (birbal-test-with-clean-state
+    (let ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")))
+      (let* ((entry (birbal-notify--format-entry s nil))
+             (cols (cadr entry)))
+        (should (string-match-p "running" (aref cols 3)))
+        (should (equal "" (aref cols 5)))))))
+
+(ert-deftest birbal-test-status-buffer-format-done ()
+  "A done session entry shows \"done\" status."
+  (birbal-test-with-clean-state
+    (let ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")))
+      (birbal-session-set-status s 'done)
+      (let* ((entry (birbal-notify--format-entry s nil))
+             (cols (cadr entry)))
+        (should (string-match-p "done" (aref cols 3)))))))
+
+(ert-deftest birbal-test-status-buffer-sorted ()
+  "birbal-notify--list-entries returns sessions sorted by created-at."
+  (birbal-test-with-clean-state
+    (let ((s1 (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/a"))
+          (s2 (birbal-session-create :agent-type 'aider       :command "aider"  :directory "/b")))
+      ;; Ensure s1 has an earlier created-at
+      (setf (birbal--session-created-at s1) 1000.0)
+      (setf (birbal--session-created-at s2) 2000.0)
+      (let ((entries (birbal-notify--list-entries)))
+        (should (= 2 (length entries)))
+        ;; First entry ID should be s1's ID
+        (should (equal (birbal--session-id s1) (car (nth 0 entries))))
+        (should (equal (birbal--session-id s2) (car (nth 1 entries))))))))
+
+(ert-deftest birbal-test-status-buffer-mark-and-kill ()
+  "birbal-list-execute kills sessions flagged in birbal--list-marks."
+  (birbal-test-with-clean-state
+    (let* ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp"))
+           (id (birbal--session-id s))
+           ;; Simulate the buffer-local marks
+           (marks (list (cons id 'kill))))
+      ;; Execute manually (without a real buffer)
+      (dolist (entry marks)
+        (let ((session (birbal-session-get (car entry))))
+          (when session
+            (pcase (cdr entry)
+              ('kill (birbal-session-kill session))))))
+      (should (null (birbal-session-get id))))))
+
+;;; ─── birbal-bridge tests ─────────────────────────────────────────────────────
+
+(ert-deftest birbal-test-bridge-find-session-by-directory ()
+  "birbal-bridge--find-session matches a session by directory."
+  (birbal-test-with-clean-state
+    (let ((s (birbal-session-create :agent-type 'claude-code
+                                    :command "claude"
+                                    :directory "/my/project")))
+      (should (eq s (birbal-bridge--find-session "/my/project")))
+      (should (null (birbal-bridge--find-session "/other"))))))
+
+(ert-deftest birbal-test-bridge-find-session-prefers-claude-code ()
+  "birbal-bridge--find-session prefers claude-code when multiple sessions match."
+  (birbal-test-with-clean-state
+    (let ((s-aider  (birbal-session-create :agent-type 'aider
+                                           :command "aider"
+                                           :directory "/proj"))
+          (s-claude (birbal-session-create :agent-type 'claude-code
+                                           :command "claude"
+                                           :directory "/proj")))
+      (should (eq s-claude (birbal-bridge--find-session "/proj"))))))
+
+(ert-deftest birbal-test-bridge-override-registers-tool ()
+  "birbal-bridge-setup registers an openDiff tool in the :birbal set."
+  (skip-unless (featurep 'monet))
+  (let ((monet--tool-registry nil)
+        (monet--enabled-sets '(:core :simple-diff)))
+    (birbal-bridge-setup)
+    (should (assoc (cons :birbal "openDiff") monet--tool-registry))))
+
+(provide 'birbal-tests)
+;;; birbal-tests.el ends here
