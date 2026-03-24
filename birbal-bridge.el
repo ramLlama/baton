@@ -1,30 +1,29 @@
-;;; birbal-bridge.el --- Monet tool overrides for birbal-aware diff handling  -*- lexical-binding: t -*-
+;;; birbal-bridge.el --- Monet integration for birbal-aware diff handling  -*- lexical-binding: t -*-
 
-;; Author: Ram Krishnaraj
+;; Author: Ram Raghunathan
 ;; Keywords: tools, ai
 
 ;;; Commentary:
-;; Integrates birbal with monet by overriding the openDiff tool with a
-;; birbal-aware handler.  When a Claude Code session requests a diff,
-;; the corresponding birbal session is set to `waiting' (reason: "diff review").
-;; When the user accepts or rejects the diff, the session is reset to `running'.
+;; Integrates birbal with monet by registering a birbal-aware openDiff handler.
+;; When a Claude Code session requests a diff, the corresponding birbal session
+;; is set to `waiting' (reason: "diff review").  When the user accepts or
+;; rejects the diff, the session is reset to `running'.
 ;;
 ;; This module is optional.  It only activates when `monet' is loaded.
 ;; Call `birbal-bridge-setup' after both monet and birbal are loaded,
 ;; or let `birbal-mode' call it automatically.
-;;
-;; No hooks are required in monet.el.
 
 ;;; Code:
 (require 'cl-lib)
 (require 'birbal-session)
 
 ;; Silence byte-compiler warnings for optional monet dependency.
+(declare-function monet-session-directory "monet" (session))
+(declare-function monet-make-open-diff-handler "monet" (diff-fn))
 (declare-function monet-make-tool "monet" (&rest plist))
-(declare-function monet--tool-open-diff-handler "monet" (params session))
-(declare-function monet--session-directory "monet" (session))
+(declare-function monet-enable-tool-set "monet" (&rest sets))
 (declare-function monet-simple-diff-tool "monet"
-                  (old-file new-file new-contents on-accept on-quit session))
+                  (old-file new-file new-contents on-accept on-quit &optional session))
 (defvar monet-open-diff-tool-schema)
 
 ;;; Session Lookup
@@ -43,61 +42,37 @@ Returns nil if no match is found."
 
 ;;; Diff Handler
 
-(defun birbal-bridge--wrap-callback (session callback)
-  "Return a function that calls CALLBACK then resets SESSION to `running'."
-  (lambda (&rest args)
-    (apply callback args)
-    (when session
-      (birbal-session-set-status session 'running))))
-
 (defun birbal-bridge--open-diff-handler (params monet-session)
   "Birbal-aware openDiff handler.
 Finds the birbal session for MONET-SESSION's directory, sets it to
-`waiting' with reason \"diff review\", then delegates to monet's original
-simple-diff handler with wrapped accept/quit callbacks.
-PARAMS and MONET-SESSION are passed through to the underlying handler."
-  (unless (featurep 'monet)
-    (error "birbal-bridge requires monet"))
-  ;; Find matching birbal session
-  (let* ((dir (monet--session-directory monet-session))
-         (birbal-session (birbal-bridge--find-session dir)))
-    ;; Signal waiting
+`waiting' with reason \"diff review\", then delegates to monet's diff
+infrastructure.  The birbal session is reset to `running' when the
+user accepts or rejects the diff.
+PARAMS and MONET-SESSION are the standard MCP handler arguments."
+  (let* ((dir (monet-session-directory monet-session))
+         (birbal-session (birbal-bridge--find-session dir))
+         (reset (lambda (&rest _)
+                  (when birbal-session
+                    (birbal-session-set-status birbal-session 'running))))
+         (diff-fn
+          (lambda (old new contents on-accept on-quit sess)
+            (monet-simple-diff-tool
+             old new contents
+             (lambda (&rest args) (apply on-accept args) (funcall reset))
+             (lambda () (funcall on-quit) (funcall reset))
+             sess)))
+         (handler (monet-make-open-diff-handler diff-fn)))
     (when birbal-session
       (birbal-session-set-status birbal-session 'waiting "diff review"))
-    ;; Delegate to monet's original simple-diff handler
-    ;; We advise the on-accept/on-quit inside monet--make-open-diff-handler
-    ;; by wrapping at the birbal level through a temp override.
-    (if birbal-session
-        (birbal-bridge--call-with-wrapped-callbacks
-         params monet-session birbal-session)
-      ;; No birbal session — fall through to default handler
-      (monet--tool-open-diff-handler params monet-session))))
-
-(defun birbal-bridge--call-with-wrapped-callbacks (params monet-session birbal-session)
-  "Call monet diff handler, resetting BIRBAL-SESSION to running after accept/quit.
-PARAMS and MONET-SESSION are forwarded to the underlying handler.
-
-Uses `cl-letf' to intercept the on-accept/on-quit lambdas that
-`monet--make-open-diff-handler' passes to `monet-simple-diff-tool'.
-This relies on `monet-simple-diff-tool' being called *synchronously* within
-the dynamic extent of the handler — which is the case as of monet 0.0.3."
-  (let (orig-fn)
-    (setq orig-fn
-          (symbol-function 'monet-simple-diff-tool))
-    (cl-letf (((symbol-function 'monet-simple-diff-tool)
-               (lambda (old-file new-file new-contents on-accept on-quit session)
-                 (funcall orig-fn
-                          old-file new-file new-contents
-                          (birbal-bridge--wrap-callback birbal-session on-accept)
-                          (birbal-bridge--wrap-callback birbal-session on-quit)
-                          session))))
-      (monet--tool-open-diff-handler params monet-session))))
+    (funcall handler params monet-session)))
 
 ;;; Setup
 
 ;;;###autoload
 (defun birbal-bridge-setup ()
-  "Override monet's openDiff tool with a birbal-aware handler.
+  "Register and activate birbal's openDiff handler in monet.
+Adds an openDiff tool to the :birbal set and enables it, which
+supersedes the default :simple-diff openDiff.
 Safe to call even if monet is not loaded — does nothing in that case."
   (when (featurep 'monet)
     (monet-make-tool
@@ -105,7 +80,8 @@ Safe to call even if monet is not loaded — does nothing in that case."
      :description "Open a diff view (birbal-aware)"
      :schema monet-open-diff-tool-schema
      :handler #'birbal-bridge--open-diff-handler
-     :set :birbal)))
+     :set :birbal)
+    (monet-enable-tool-set :birbal)))
 
 (provide 'birbal-bridge)
 ;;; birbal-bridge.el ends here

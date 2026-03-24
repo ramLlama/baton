@@ -1,6 +1,6 @@
 ;;; birbal-tests.el --- ERT test suite for birbal  -*- lexical-binding: t -*-
 
-;; Author: Ram Krishnaraj
+;; Author: Ram Raghunathan
 ;; Keywords: tools, ai, test
 
 ;;; Commentary:
@@ -341,13 +341,14 @@
                                            :directory "/proj")))
       (should (eq s-claude (birbal-bridge--find-session "/proj"))))))
 
-(ert-deftest birbal-test-bridge-override-registers-tool ()
-  "birbal-bridge-setup registers an openDiff tool in the :birbal set."
+(ert-deftest birbal-test-bridge-setup-enables-birbal-set ()
+  "birbal-bridge-setup registers openDiff in :birbal set and enables it."
   (skip-unless (featurep 'monet))
   (let ((monet--tool-registry nil)
         (monet--enabled-sets '(:core :simple-diff)))
     (birbal-bridge-setup)
-    (should (assoc (cons :birbal "openDiff") monet--tool-registry))))
+    (should (assoc (cons :birbal "openDiff") monet--tool-registry))
+    (should (memq :birbal monet--enabled-sets))))
 
 (provide 'birbal-tests)
 ;;; birbal-tests.el ends here
