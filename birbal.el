@@ -192,10 +192,17 @@ NAME is an optional display name; prompted when called with \\[universal-argumen
       (progn
         (birbal--setup-hooks)
         (birbal-modeline-mode 1)
-        ;; Wire monet integration (handles both already-loaded and load-later cases)
+        ;; Wire monet integration.
+        ;; birbal-monet-setup must run after monet-register-core-tools (called
+        ;; from monet-mode activation), not just after monet is loaded.  Hook
+        ;; into monet-mode-hook so the registry is ready when we override it.
+        ;; Also handle the case where monet-mode is already active.
         (with-eval-after-load 'monet
           (require 'birbal-monet)
-          (birbal-monet-setup)))
+          (add-hook 'monet-mode-hook
+                    (lambda () (when monet-mode (birbal-monet-setup))))
+          (when (and (boundp 'monet-mode) monet-mode)
+            (birbal-monet-setup))))
     (birbal--teardown-hooks)
     (birbal-modeline-mode -1)))
 

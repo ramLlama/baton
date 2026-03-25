@@ -58,7 +58,9 @@ Finds the birbal session for MONET-SESSION's directory, sets it to
 immediately; call `birbal-review-diff' when ready to review it.
 The birbal session is reset to `running' when the user accepts or
 rejects the diff.
-PARAMS and MONET-SESSION are the standard MCP handler arguments."
+PARAMS and MONET-SESSION are the standard MCP handler arguments.
+Returns a deferred response indicator so Claude Code waits for the
+user to accept or reject the diff before continuing."
   (let* ((dir (monet-session-directory monet-session))
          (birbal-session (birbal-monet--find-session dir))
          (reset (lambda (&rest _)
@@ -75,11 +77,15 @@ PARAMS and MONET-SESSION are the standard MCP handler arguments."
              (lambda () (funcall on-quit) (funcall reset))
              sess)))
          (handler (monet-make-open-diff-handler diff-fn)))
-    (when birbal-session
-      (setf (birbal--session-metadata birbal-session)
-            (plist-put (birbal--session-metadata birbal-session)
-                       :pending-diff (lambda () (funcall handler params monet-session))))
-      (birbal-session-set-status birbal-session 'waiting "diff review"))))
+    (if birbal-session
+        (progn
+          (setf (birbal--session-metadata birbal-session)
+                (plist-put (birbal--session-metadata birbal-session)
+                           :pending-diff (lambda () (funcall handler params monet-session))))
+          (birbal-session-set-status birbal-session 'waiting "diff review")
+          `((deferred . t) (unique-key . ,(alist-get 'tab_name params))))
+      ;; No matching birbal session — open the diff immediately.
+      (funcall handler params monet-session))))
 
 ;;; User Commands
 
