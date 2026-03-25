@@ -28,7 +28,8 @@
          (birbal-agent-types (make-hash-table :test 'eq))
          (birbal-session-created-hook nil)
          (birbal-session-killed-hook nil)
-         (birbal-session-status-changed-hook nil))
+         (birbal-session-status-changed-hook nil)
+         (birbal-session-unread-changed-hook nil))
      ,@body))
 
 ;;; ─── birbal-session tests ────────────────────────────────────────────────────
@@ -148,6 +149,42 @@
         (birbal-session-kill s)
         (should (eq hook-arg s))))))
 
+;;; ─── birbal-session unread tests ─────────────────────────────────────────────
+
+(ert-deftest birbal-test-session-unread-p-no-buffer ()
+  "birbal-session-unread-p returns nil when session has no live buffer."
+  (birbal-test-with-clean-state
+    (let ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")))
+      ;; No buffer set — buffer field is nil
+      (should (null (birbal-session-unread-p s))))))
+
+(ert-deftest birbal-test-session-unread-p-hashes-differ ()
+  "birbal-session-unread-p returns t when current-hash differs from last-seen-hash."
+  (birbal-test-with-clean-state
+    (let* ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp"))
+           (buf (get-buffer-create " *birbal-test-unread*")))
+      (unwind-protect
+          (progn
+            (setf (birbal--session-buffer s) buf)
+            (setf (birbal--session-metadata s)
+                  (list :current-hash "abc123" :last-seen-hash nil))
+            ;; Buffer not in any window → unread
+            (should (birbal-session-unread-p s)))
+        (kill-buffer buf)))))
+
+(ert-deftest birbal-test-session-unread-p-hashes-equal ()
+  "birbal-session-unread-p returns nil when current-hash equals last-seen-hash."
+  (birbal-test-with-clean-state
+    (let* ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp"))
+           (buf (get-buffer-create " *birbal-test-read*")))
+      (unwind-protect
+          (progn
+            (setf (birbal--session-buffer s) buf)
+            (setf (birbal--session-metadata s)
+                  (list :current-hash "abc123" :last-seen-hash "abc123"))
+            (should (null (birbal-session-unread-p s))))
+        (kill-buffer buf)))))
+
 ;;; ─── Agent-type registry tests ───────────────────────────────────────────────
 
 (ert-deftest birbal-test-define-agent-type-stores ()
@@ -155,8 +192,7 @@
   (birbal-test-with-clean-state
     (birbal-define-agent-type :name 'my-agent
                               :command "my-cmd"
-                              :waiting-patterns '((">" . "prompt"))
-                              :done-patterns '("bye"))
+                              :waiting-patterns '((">" . "prompt")))
     (should (gethash 'my-agent birbal-agent-types))))
 
 (ert-deftest birbal-test-define-agent-type-retrieval ()
@@ -164,8 +200,7 @@
   (birbal-test-with-clean-state
     (birbal-define-agent-type :name 'my-agent
                               :command "my-cmd"
-                              :waiting-patterns nil
-                              :done-patterns nil)
+                              :waiting-patterns nil)
     (should (equal "my-cmd"
                    (plist-get (gethash 'my-agent birbal-agent-types) :command)))))
 
@@ -174,8 +209,7 @@
   (birbal-test-with-clean-state
     (birbal-define-agent-type :name 'my-agent
                               :command "cmd"
-                              :waiting-patterns '(("^> " . "input") ("Allow" . "permission"))
-                              :done-patterns nil)
+                              :waiting-patterns '(("^> " . "input") ("Allow" . "permission")))
     (let ((patterns (plist-get (gethash 'my-agent birbal-agent-types) :waiting-patterns)))
       (should (equal (car (assoc "^> " patterns)) "^> "))
       (should (equal (cdr (assoc "^> " patterns)) "input"))
@@ -187,38 +221,17 @@
   "Returns (:waiting . reason) when a waiting pattern matches."
   (let ((result (birbal-process--match-patterns
                  "Do you want to continue? [Y/n]"
-                 '(("Y/n" . "confirmation") ("Allow" . "permission"))
-                 '("Goodbye"))))
+                 '(("Y/n" . "confirmation") ("Allow" . "permission")))))
     (should (consp result))
     (should (eq (car result) :waiting))
     (should (equal (cdr result) "confirmation"))))
-
-(ert-deftest birbal-test-process-match-done-pattern ()
-  "Returns :done when a done pattern matches."
-  (let ((result (birbal-process--match-patterns
-                 "Session ended. Goodbye!"
-                 '(("Y/n" . "confirmation"))
-                 '("Session ended" "Goodbye"))))
-    (should (eq result :done))))
 
 (ert-deftest birbal-test-process-match-no-match ()
   "Returns nil when no pattern matches."
   (let ((result (birbal-process--match-patterns
                  "Processing files..."
-                 '(("Y/n" . "confirmation"))
-                 '("Goodbye"))))
+                 '(("Y/n" . "confirmation")))))
     (should (null result))))
-
-(ert-deftest birbal-test-process-match-waiting-takes-priority ()
-  "Waiting pattern takes priority over done pattern when both would match."
-  ;; If text contains both a waiting pattern and a done pattern,
-  ;; waiting is checked first.
-  (let ((result (birbal-process--match-patterns
-                 "Allow access? Goodbye"
-                 '(("Allow" . "permission"))
-                 '("Goodbye"))))
-    (should (consp result))
-    (should (eq (car result) :waiting))))
 
 ;;; ─── birbal-notify modeline tests ────────────────────────────────────────────
 
@@ -228,25 +241,62 @@
     (should (equal "" (birbal-notify--modeline-string)))))
 
 (ert-deftest birbal-test-notify-modeline-running-only ()
-  "Modeline shows count without /waiting when no sessions are waiting."
+  "Modeline shows Nr count when sessions are running."
   (birbal-test-with-clean-state
     (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")
     (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")
     (let ((str (birbal-notify--modeline-string)))
-      ;; Should contain "B[2]" (no slash)
-      (should (string-match-p "B\\[2\\]" str))
+      (should (string-match-p "B\\[2r\\]" str))
       (should-not (string-match-p "/" str)))))
 
 (ert-deftest birbal-test-notify-modeline-with-waiting ()
-  "Modeline shows running/waiting counts when a session is waiting."
+  "Modeline shows Nw/Nr when a session is waiting."
   (birbal-test-with-clean-state
     (let ((s1 (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp"))
           (s2 (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp"))
           (s3 (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")))
       (birbal-session-set-status s1 'waiting "prompt")
       (let ((str (birbal-notify--modeline-string)))
-        ;; 2 running, 1 waiting -> B[2/1]
-        (should (string-match-p "B\\[2/1\\]" str))))))
+        ;; 1 waiting, 2 running -> B[1w/2r]
+        (should (string-match-p "B\\[1w/2r\\]" str))))))
+
+(ert-deftest birbal-test-notify-modeline-idle-state ()
+  "Modeline shows Ni count for idle sessions."
+  (birbal-test-with-clean-state
+    (let ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")))
+      (birbal-session-set-status s 'idle)
+      (let ((str (birbal-notify--modeline-string)))
+        (should (string-match-p "B\\[1i\\]" str))))))
+
+(ert-deftest birbal-test-notify-modeline-unread-count ()
+  "Modeline shows N* when sessions have unread output."
+  (birbal-test-with-clean-state
+    (let* ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp"))
+           (buf (get-buffer-create " *birbal-test-unread-ml*")))
+      (unwind-protect
+          (progn
+            (birbal-session-set-status s 'idle)
+            (setf (birbal--session-buffer s) buf)
+            (setf (birbal--session-metadata s)
+                  (list :current-hash "changed" :last-seen-hash nil))
+            (let ((str (birbal-notify--modeline-string)))
+              (should (string-match-p "1\\*" str))))
+        (kill-buffer buf)))))
+
+(ert-deftest birbal-test-notify-modeline-no-unread ()
+  "Modeline omits * when all sessions have read output."
+  (birbal-test-with-clean-state
+    (let* ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp"))
+           (buf (get-buffer-create " *birbal-test-read-ml*")))
+      (unwind-protect
+          (progn
+            (birbal-session-set-status s 'idle)
+            (setf (birbal--session-buffer s) buf)
+            (setf (birbal--session-metadata s)
+                  (list :current-hash "same" :last-seen-hash "same"))
+            (let ((str (birbal-notify--modeline-string)))
+              (should-not (string-match-p "\\*" str))))
+        (kill-buffer buf)))))
 
 (ert-deftest birbal-test-notify-fires-on-waiting ()
   "birbal-notify-function is called when a session transitions to waiting."
@@ -256,6 +306,15 @@
            (birbal-notify-function (lambda (sess) (setq notified-session sess))))
       ;; Call the status-changed handler directly to test the notification path.
       (birbal-notify--on-status-changed s 'running 'waiting)
+      (should (eq notified-session s)))))
+
+(ert-deftest birbal-test-notify-unread-handler-fires-notify-function ()
+  "birbal-notify--on-unread-changed calls birbal-notify-function with session."
+  (birbal-test-with-clean-state
+    (let* ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp"))
+           notified-session
+           (birbal-notify-function (lambda (sess) (setq notified-session sess))))
+      (birbal-notify--on-unread-changed s)
       (should (eq notified-session s)))))
 
 ;;; ─── birbal-notify status buffer rendering tests ─────────────────────────────
@@ -281,14 +340,17 @@
         (should (string-match-p "running" (aref cols 3)))
         (should (equal "" (aref cols 5)))))))
 
-(ert-deftest birbal-test-status-buffer-format-done ()
-  "A done session entry shows \"done\" status."
+(ert-deftest birbal-test-status-buffer-format-idle ()
+  "An idle session entry shows \"idle\" status and ○ indicator."
   (birbal-test-with-clean-state
     (let ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")))
-      (birbal-session-set-status s 'done)
+      (birbal-session-set-status s 'idle)
       (let* ((entry (birbal-notify--format-entry s nil))
              (cols (cadr entry)))
-        (should (string-match-p "done" (aref cols 3)))))))
+        (should (string-match-p "idle" (aref cols 3)))
+        ;; cols[1] is the indicator
+        (should (string-match-p "○" (aref cols 1)))
+        (should-not (string-match-p "\\*" (aref cols 1)))))))
 
 (ert-deftest birbal-test-status-buffer-sorted ()
   "birbal-notify--list-entries returns sessions sorted by created-at."

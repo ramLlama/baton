@@ -20,7 +20,7 @@
   command         ; string, the shell command that was run
   directory       ; string, working directory
   buffer          ; vterm buffer
-  status          ; symbol: running | waiting | idle | done | error
+  status          ; symbol: running | waiting | idle
   waiting-reason  ; string or nil ("permission prompt", "diff review")
   created-at      ; float-time timestamp
   updated-at      ; float-time timestamp
@@ -47,6 +47,10 @@ Each function is called with one argument: the killed `birbal--session'.")
 (defvar birbal-session-status-changed-hook nil
   "Hook called when a session's status changes.
 Each function is called with three arguments: SESSION, OLD-STATUS, NEW-STATUS.")
+
+(defvar birbal-session-unread-changed-hook nil
+  "Hook called when a session transitions from read to unread.
+Each function is called with one argument: SESSION.")
 
 ;;; Internal Helpers
 
@@ -144,6 +148,19 @@ Fires `birbal-session-killed-hook'."
 (defun birbal-session-kill-all ()
   "Kill all registered sessions."
   (mapc #'birbal-session-kill (birbal-session-list)))
+
+(defun birbal-session-unread-p (session)
+  "Return t if SESSION has output the user has not yet seen.
+A session is unread when its buffer is not currently visible and its
+output hash has changed since the user last switched away from it."
+  (let* ((buf (birbal--session-buffer session))
+         (meta (birbal--session-metadata session))
+         (current (plist-get meta :current-hash))
+         (last-seen (plist-get meta :last-seen-hash)))
+    (and buf
+         (buffer-live-p buf)
+         (not (get-buffer-window buf t))
+         (not (equal current last-seen)))))
 
 (provide 'birbal-session)
 ;;; birbal-session.el ends here

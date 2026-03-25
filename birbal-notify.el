@@ -5,7 +5,7 @@
 
 ;;; Commentary:
 ;; Provides the user-facing notification surface for birbal:
-;;   - A modeline segment showing running/waiting counts
+;;   - A modeline segment showing waiting/idle/running counts and unread marker
 ;;   - A `*Birbal*' status buffer (ibuffer-style tabulated list)
 ;;   - `birbal-jump' and `birbal-jump-to-waiting' for completing-read navigation
 ;;   - A `birbal-notify-function' hook for alerting the user
@@ -14,7 +14,7 @@
 (require 'cl-lib)
 (require 'birbal-session)
 
-(declare-function birbal-new "birbal" (agent-type-name directory))
+(declare-function birbal-new "birbal" (agent-type-name directory &optional name))
 
 ;;; Faces
 
@@ -23,9 +23,9 @@
   "Face for sessions in `waiting' status."
   :group 'birbal)
 
-(defface birbal-face-done
+(defface birbal-face-idle
   '((t :inherit shadow))
-  "Face for sessions in `done' status."
+  "Face for sessions in `idle' status."
   :group 'birbal)
 
 (defface birbal-face-running
@@ -33,37 +33,55 @@
   "Face for sessions in `running' status."
   :group 'birbal)
 
+(defface birbal-face-unread
+  '((t :inherit font-lock-warning-face))
+  "Face for the unread output indicator."
+  :group 'birbal)
+
 ;;; Notification Function
 
 (defvar birbal-notify-function #'birbal-notify--default
-  "Function called when a session transitions to `waiting' status.
-Called with one argument: the `birbal--session'.")
+  "Function called when a session needs attention.
+Called with one argument: the `birbal--session'.  Invoked when a session
+transitions to `waiting' status, and when output arrives in a session
+buffer the user is not currently viewing (unread).")
 
 (defun birbal-notify--default (session)
   "Default notification: display a message in the echo area for SESSION."
   (message "birbal: %s needs attention (%s)"
            (birbal--session-name session)
-           (or (birbal--session-waiting-reason session) "waiting")))
+           (or (birbal--session-waiting-reason session) "unread output")))
 
 ;;; Modeline
 
 (defun birbal-notify--modeline-string ()
   "Return a propertized modeline string showing agent counts.
-Format: \" B[<running>/<waiting>]\" omitting \"/<waiting>\" when zero."
+Format: \" B[Nw/Ni/Nr N*]\" — segments omitted when zero; `*' count
+omitted when no unread sessions.  The whole string is highlighted in
+`birbal-face-waiting' when any session is waiting."
   (let* ((sessions (birbal-session-list))
-         (running (length (cl-remove-if-not
-                           (lambda (s) (memq (birbal--session-status s)
-                                             '(running idle)))
-                           sessions)))
          (waiting (length (cl-remove-if-not
                            (lambda (s) (eq (birbal--session-status s) 'waiting))
-                           sessions))))
-    (if (zerop (+ running waiting))
+                           sessions)))
+         (idle (length (cl-remove-if-not
+                        (lambda (s) (eq (birbal--session-status s) 'idle))
+                        sessions)))
+         (running (length (cl-remove-if-not
+                           (lambda (s) (eq (birbal--session-status s) 'running))
+                           sessions)))
+         (unread (length (cl-remove-if-not
+                          (lambda (s)
+                            (and (not (eq (birbal--session-status s) 'running))
+                                 (birbal-session-unread-p s)))
+                          sessions))))
+    (if (zerop (+ waiting idle running))
         ""
-      (let* ((counts (if (zerop waiting)
-                         (number-to-string running)
-                       (format "%d/%d" running waiting)))
-             (str (format " B[%s]" counts))
+      (let* ((parts (delq nil (list (when (> waiting 0) (format "%dw" waiting))
+                                    (when (> idle    0) (format "%di" idle))
+                                    (when (> running  0) (format "%dr" running)))))
+             (counts (mapconcat #'identity parts "/"))
+             (unread-str (if (> unread 0) (format " %d*" unread) ""))
+             (str (format " B[%s%s]" counts unread-str))
              (face (if (zerop waiting) 'mode-line 'birbal-face-waiting))
              (map (make-sparse-keymap)))
         (define-key map [mode-line mouse-1] #'birbal-list)
@@ -107,6 +125,12 @@ Format: \" B[<running>/<waiting>]\" omitting \"/<waiting>\" when zero."
   (force-mode-line-update t)
   (birbal-notify--refresh-list-buffer))
 
+(defun birbal-notify--on-unread-changed (session)
+  "Handle SESSION becoming unread."
+  (force-mode-line-update t)
+  (funcall birbal-notify-function session)
+  (birbal-notify--refresh-list-buffer))
+
 ;;; Status Buffer (`*Birbal*')
 
 (defvar-local birbal--list-marks nil
@@ -117,15 +141,18 @@ Format: \" B[<running>/<waiting>]\" omitting \"/<waiting>\" when zero."
   (pcase (birbal--session-status session)
     ('waiting (propertize "●" 'face 'birbal-face-waiting))
     ('running (propertize "▷" 'face 'birbal-face-running))
-    ('done    (propertize "✓" 'face 'birbal-face-done))
-    ('error   (propertize "✗" 'face 'error))
-    (_        " ")))
+    ('idle
+     (if (birbal-session-unread-p session)
+         (concat (propertize "○" 'face 'birbal-face-idle)
+                 (propertize "*" 'face 'birbal-face-unread))
+       (propertize "○" 'face 'birbal-face-idle)))
+    (_ " ")))
 
 (defun birbal-notify--session-face (session)
   "Return the display face for SESSION based on its status."
   (pcase (birbal--session-status session)
     ('waiting 'birbal-face-waiting)
-    ('done    'birbal-face-done)
+    ('idle    'birbal-face-idle)
     (_        'default)))
 
 (defun birbal-notify--format-entry (session marks)

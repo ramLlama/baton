@@ -39,19 +39,16 @@
   "Hash table mapping agent-type symbols to their definition plists.
 Each plist has keys: :command, :args, :waiting-patterns, :done-patterns.")
 
-(cl-defun birbal-define-agent-type (&key name command (args nil)
-                                         waiting-patterns done-patterns)
+(cl-defun birbal-define-agent-type (&key name command (args nil) waiting-patterns)
   "Define or redefine an agent type.
 NAME is a symbol (e.g. `claude-code').
 COMMAND is the shell command string.
 ARGS is a list of default arguments (default: nil).
-WAITING-PATTERNS is an alist of (REGEXP . REASON).
-DONE-PATTERNS is a list of regexps signalling session completion."
+WAITING-PATTERNS is an alist of (REGEXP . REASON)."
   (puthash name
            (list :command command
                  :args args
-                 :waiting-patterns waiting-patterns
-                 :done-patterns done-patterns)
+                 :waiting-patterns waiting-patterns)
            birbal-agent-types))
 
 ;;; Built-in Agent Types
@@ -65,8 +62,7 @@ DONE-PATTERNS is a list of regexps signalling session completion."
  '(("╭─" . "input prompt")
    ("Allow.*tool\\|Allow.*command\\|Bash.*Allow" . "permission prompt")
    ("Do you want to\\|Would you like to" . "confirmation")
-   ("\\[Y/n\\]\\|\\[y/N\\]" . "confirmation"))
- :done-patterns '("Session ended" "Goodbye"))
+   ("\\[Y/n\\]\\|\\[y/N\\]" . "confirmation")))
 
 (birbal-define-agent-type
  :name 'aider
@@ -75,8 +71,7 @@ DONE-PATTERNS is a list of regexps signalling session completion."
  :waiting-patterns
  '(("^> " . "input prompt")
    ("Add these files" . "confirmation")
-   ("\\[Y/n\\]" . "confirmation"))
- :done-patterns '("Goodbye" "^Aider v"))
+   ("\\[Y/n\\]" . "confirmation")))
 
 (birbal-define-agent-type
  :name 'codex
@@ -84,8 +79,7 @@ DONE-PATTERNS is a list of regexps signalling session completion."
  :args '()
  :waiting-patterns
  '(("^> " . "input prompt")
-   ("\\[y/N\\]" . "confirmation"))
- :done-patterns '("Bye!" "Session complete"))
+   ("\\[y/N\\]" . "confirmation")))
 
 ;;; Customization Group
 
@@ -106,15 +100,17 @@ uses colon-separated RGB codes that libvterm does not render."
 
 (defun birbal--setup-hooks ()
   "Add birbal notification hooks."
-  (add-hook 'birbal-session-status-changed-hook #'birbal-notify--on-status-changed)
-  (add-hook 'birbal-session-created-hook        #'birbal-notify--on-session-event)
-  (add-hook 'birbal-session-killed-hook         #'birbal-notify--on-session-event))
+  (add-hook 'birbal-session-status-changed-hook  #'birbal-notify--on-status-changed)
+  (add-hook 'birbal-session-created-hook         #'birbal-notify--on-session-event)
+  (add-hook 'birbal-session-killed-hook          #'birbal-notify--on-session-event)
+  (add-hook 'birbal-session-unread-changed-hook  #'birbal-notify--on-unread-changed))
 
 (defun birbal--teardown-hooks ()
   "Remove birbal notification hooks."
-  (remove-hook 'birbal-session-status-changed-hook #'birbal-notify--on-status-changed)
-  (remove-hook 'birbal-session-created-hook        #'birbal-notify--on-session-event)
-  (remove-hook 'birbal-session-killed-hook         #'birbal-notify--on-session-event))
+  (remove-hook 'birbal-session-status-changed-hook  #'birbal-notify--on-status-changed)
+  (remove-hook 'birbal-session-created-hook         #'birbal-notify--on-session-event)
+  (remove-hook 'birbal-session-killed-hook          #'birbal-notify--on-session-event)
+  (remove-hook 'birbal-session-unread-changed-hook  #'birbal-notify--on-unread-changed))
 
 ;;; User Commands
 
@@ -160,15 +156,19 @@ uses colon-separated RGB codes that libvterm does not render."
     (birbal-process-send-key session "ESC")))
 
 ;;;###autoload
-(defun birbal-new (agent-type-name directory)
+(defun birbal-new (agent-type-name directory &optional name)
   "Spawn a new agent session.
 AGENT-TYPE-NAME is a string naming the agent type (e.g. \"claude-code\").
-DIRECTORY is the working directory for the session."
+DIRECTORY is the working directory for the session.
+NAME is an optional display name; prompted when called with \\[universal-argument]."
   (interactive
    (list (completing-read "Agent type: "
                           (hash-table-keys birbal-agent-types)
                           nil t)
-         (read-directory-name "Directory: " nil nil t)))
+         (read-directory-name "Directory: " nil nil t)
+         (when current-prefix-arg
+           (let ((n (read-string "Session name (empty = auto): ")))
+             (unless (string-empty-p n) n)))))
   (let* ((agent-type (intern agent-type-name))
          (def (gethash agent-type birbal-agent-types)))
     (unless def
@@ -183,7 +183,8 @@ DIRECTORY is the working directory for the session."
            (session (birbal-session-create
                      :agent-type agent-type
                      :command command
-                     :directory (expand-file-name directory))))
+                     :directory (expand-file-name directory)
+                     :name name)))
       (birbal-process-spawn session)
       (when-let* ((buf (birbal--session-buffer session)))
         (pop-to-buffer buf))

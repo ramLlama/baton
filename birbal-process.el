@@ -5,7 +5,7 @@
 
 ;;; Commentary:
 ;; Handles spawning vterm processes for birbal sessions, watching their output
-;; for status transitions (running -> waiting -> done), and sending input.
+;; for status transitions (running -> waiting -> idle), and sending input.
 ;;
 ;; Pattern matching functions are pure and have no vterm dependency,
 ;; making them fully unit-testable.  vterm-dependent functions skip gracefully
@@ -23,22 +23,14 @@
 
 ;;; Pattern Matching (pure, no vterm dependency)
 
-(defun birbal-process--match-patterns (text waiting-patterns done-patterns)
-  "Match TEXT against WAITING-PATTERNS and DONE-PATTERNS.
+(defun birbal-process--match-patterns (text waiting-patterns)
+  "Match TEXT against WAITING-PATTERNS.
 WAITING-PATTERNS is an alist of (REGEXP . REASON) strings.
-DONE-PATTERNS is a list of regexp strings.
 
-Returns:
-  (cons :waiting REASON)  if a waiting pattern matched
-  :done                   if a done pattern matched
-  nil                     if no pattern matched"
-  (let ((waiting-match
-         (cl-find-if (lambda (entry) (string-match-p (car entry) text))
-                     waiting-patterns)))
-    (cond
-     (waiting-match (cons :waiting (cdr waiting-match)))
-     ((cl-find-if (lambda (p) (string-match-p p text)) done-patterns) :done)
-     (t nil))))
+Returns (cons :waiting REASON) if a waiting pattern matched, nil otherwise."
+  (when-let* ((match (cl-find-if (lambda (entry) (string-match-p (car entry) text))
+                                 waiting-patterns)))
+    (cons :waiting (cdr match))))
 
 ;;; Buffer-local session reference
 
@@ -94,9 +86,10 @@ named \"*birbal:<name>*\" and the session's buffer slot is updated."
     ;; Initialize watcher metadata
     (let ((now (float-time)))
       (setf (birbal--session-metadata session)
-            (plist-put (birbal--session-metadata session) :last-output-time now))
-      (setf (birbal--session-metadata session)
-            (plist-put (birbal--session-metadata session) :last-output-hash "")))
+            (list :last-output-time now
+                  :last-output-hash ""
+                  :current-hash ""
+                  :last-seen-hash nil)))
     (birbal-process--start-watcher session)
     buf))
 
@@ -135,8 +128,8 @@ the buffer again (it is already being killed)."
       (run-hook-with-args 'birbal-session-killed-hook session))))
 
 (defun birbal-process--reset-to-running (session)
-  "Reset SESSION to `running' status if it is currently `waiting'."
-  (when (eq (birbal--session-status session) 'waiting)
+  "Reset SESSION to `running' status if it is currently `waiting' or `idle'."
+  (when (memq (birbal--session-status session) '(waiting idle))
     (birbal-session-set-status session 'running)))
 
 (defconst birbal-process--input-commands
@@ -147,12 +140,16 @@ the buffer again (it is already being killed)."
   "vterm commands that count as user input for status-reset purposes.")
 
 (defun birbal-process--on-input ()
-  "Reset session to `running' when the user sends actual input to the vterm.
-Guards against false positives from scrolling and other non-input commands."
+  "Reset session to `running' when the user sends input to the vterm.
+Handles both `waiting' and `idle' sessions.  Also resets the quiet-period
+clock so the watcher does not immediately re-derive the prior state."
   (when (and birbal--current-session
-             (eq (birbal--session-status birbal--current-session) 'waiting)
+             (memq (birbal--session-status birbal--current-session) '(waiting idle))
              (memq this-command birbal-process--input-commands))
-    (birbal-session-set-status birbal--current-session 'running)))
+    (birbal-session-set-status birbal--current-session 'running)
+    (setf (birbal--session-metadata birbal--current-session)
+          (plist-put (birbal--session-metadata birbal--current-session)
+                     :last-output-time (float-time)))))
 
 ;;; Output Watcher
 
@@ -163,7 +160,7 @@ Guards against false positives from scrolling and other non-input commands."
   "Number of lines from end of buffer to scan for patterns.")
 
 (defconst birbal-process--quiet-threshold 0.5
-  "Seconds of output quiet required before transitioning to waiting status.")
+  "Seconds of output quiet required before transitioning to waiting or idle status.")
 
 (defun birbal-process--buffer-tail (buf)
   "Return the last `birbal-process--scan-lines' lines of BUF as a string."
@@ -184,48 +181,63 @@ Stores the timer in SESSION's metadata under :watcher-timer."
           (plist-put (birbal--session-metadata session) :watcher-timer timer))))
 
 (defun birbal-process--watcher-tick (session)
-  "Check SESSION's output and update status if warranted.
-Cancels the timer if the buffer is no longer live.
-Only transitions `running' sessions; done sessions are left alone."
+  "Observe SESSION's output and derive its current status.
+Cancels the timer if the buffer is no longer live.  State is computed
+fresh each tick: `running' if output changed, `waiting' if quiet and a
+waiting pattern matches, `idle' otherwise.  Tracks `:current-hash' and
+`:last-seen-hash' in session metadata for unread detection."
   (let ((buf (birbal--session-buffer session)))
     (if (not (and buf (buffer-live-p buf)))
         ;; Buffer gone — stop watching
         (when-let* ((timer (plist-get (birbal--session-metadata session) :watcher-timer)))
           (cancel-timer timer))
-      ;; Buffer alive — only act on running sessions
-      (when (eq (birbal--session-status session) 'running)
-        (let* ((text (birbal-process--buffer-tail buf))
-               (current-hash (md5 text))
-               (meta (birbal--session-metadata session))
-               (last-hash (or (plist-get meta :last-output-hash) ""))
-               (last-time (or (plist-get meta :last-output-time) (float-time)))
-               (now (float-time)))
-          ;; Track when output last changed
-          (unless (equal current-hash last-hash)
-            (setf (birbal--session-metadata session)
-                  (plist-put (birbal--session-metadata session)
-                             :last-output-hash current-hash))
-            (setf (birbal--session-metadata session)
-                  (plist-put (birbal--session-metadata session)
-                             :last-output-time now))
-            (setq last-time now))
-          ;; Only check patterns after output has been quiet for the threshold
-          (when (>= (- now last-time) birbal-process--quiet-threshold)
-            (let* ((agent-type-sym (birbal--session-agent-type session))
-                   (agent-def (and (boundp 'birbal-agent-types)
-                                   (gethash agent-type-sym birbal-agent-types)))
-                   (waiting-patterns (and agent-def (plist-get agent-def :waiting-patterns)))
-                   (done-patterns (and agent-def (plist-get agent-def :done-patterns)))
-                   (result (birbal-process--match-patterns
-                            text waiting-patterns done-patterns)))
-              (cond
-               ((and (consp result) (eq (car result) :waiting))
-                (birbal-session-set-status session 'waiting (cdr result)))
-               ((eq result :done)
-                (birbal-session-set-status session 'done)
-                (when-let* ((timer (plist-get (birbal--session-metadata session)
-                                              :watcher-timer)))
-                  (cancel-timer timer)))))))))))
+      ;; Buffer alive — derive state from observation
+      (let* ((text (birbal-process--buffer-tail buf))
+             (current-hash (md5 text))
+             (meta (birbal--session-metadata session))
+             (last-hash (or (plist-get meta :last-output-hash) ""))
+             (last-time (or (plist-get meta :last-output-time) (float-time)))
+             (now (float-time))
+             (hash-changed (not (equal current-hash last-hash)))
+             ;; Check unread state BEFORE updating :current-hash
+             (was-unread (birbal-session-unread-p session)))
+        ;; Update :current-hash every tick (used by birbal-session-unread-p)
+        (setf (birbal--session-metadata session)
+              (plist-put (birbal--session-metadata session) :current-hash current-hash))
+        ;; Track when output last changed
+        (when hash-changed
+          (setf (birbal--session-metadata session)
+                (plist-put (birbal--session-metadata session) :last-output-hash current-hash))
+          (setf (birbal--session-metadata session)
+                (plist-put (birbal--session-metadata session) :last-output-time now))
+          (setq last-time now))
+        ;; Derive status (guard set-status calls to only fire hook on actual change)
+        (cond
+         (hash-changed
+          (unless (eq (birbal--session-status session) 'running)
+            (birbal-session-set-status session 'running)))
+         ((>= (- now last-time) birbal-process--quiet-threshold)
+          (let* ((agent-type-sym (birbal--session-agent-type session))
+                 (agent-def (and (boundp 'birbal-agent-types)
+                                 (gethash agent-type-sym birbal-agent-types)))
+                 (waiting-patterns (and agent-def (plist-get agent-def :waiting-patterns)))
+                 (result (birbal-process--match-patterns text waiting-patterns)))
+            (if (and (consp result) (eq (car result) :waiting))
+                (let ((reason (cdr result)))
+                  (unless (and (eq (birbal--session-status session) 'waiting)
+                               (equal (birbal--session-waiting-reason session) reason))
+                    (birbal-session-set-status session 'waiting reason)))
+              (unless (eq (birbal--session-status session) 'idle)
+                (birbal-session-set-status session 'idle))))))
+        ;; Mark session read while buffer is visible
+        (when (get-buffer-window buf t)
+          (setf (birbal--session-metadata session)
+                (plist-put (birbal--session-metadata session) :last-seen-hash current-hash)))
+        ;; Fire unread hook on read→unread transition
+        (when (and (birbal-session-unread-p session) (not was-unread))
+          (run-hook-with-args 'birbal-session-unread-changed-hook session))
+        ;; Keep modeline current (unread count can change without a status change)
+        (force-mode-line-update t)))))
 
 (provide 'birbal-process)
 ;;; birbal-process.el ends here
