@@ -1,7 +1,18 @@
 EMACS ?= emacs
-ELPA_DIR ?= $(HOME)/.emacs.d/elpa
-MONET_DIR ?= ../monet
-VTERM_DIR := $(firstword $(wildcard $(ELPA_DIR)/vterm-*/))
+
+ifndef VTERM_DIR
+VTERM_DIR := $(shell $(EMACS) --batch \
+  --eval "(package-initialize)" \
+  --eval "(when-let* ((f (locate-library \"vterm\"))) (princ (file-name-directory f)))" \
+  2>/dev/null)
+endif
+
+ifndef MONET_DIR
+MONET_DIR := $(shell $(EMACS) --batch \
+  --eval "(package-initialize)" \
+  --eval "(when-let* ((f (locate-library \"monet\"))) (princ (file-name-directory f)))" \
+  2>/dev/null)
+endif
 
 LOAD_PATHS := -L . \
               $(if $(MONET_DIR),-L $(MONET_DIR)) \
