@@ -18,8 +18,12 @@
 (defvar vterm-shell)
 (defvar vterm-term-environment-variable)
 (defvar vterm-buffer-name-string)
-(defvar vterm--redraw-immididately)
+(defvar vterm--redraw-immediately)
 (defvar birbal-term-name)
+
+(declare-function vterm-mode          "vterm" ())
+(declare-function vterm-send-string   "vterm" (string &optional paste-p))
+(declare-function vterm-send-key      "vterm" (key &optional shift meta ctrl))
 
 ;;; Pattern Matching (pure, no vterm dependency)
 
@@ -77,7 +81,7 @@ named \"*birbal:<name>*\" and the session's buffer slot is updated."
       (setq-local cursor-type nil)
       (setq-local cursor-in-non-selected-windows nil)
       ;; Batch redraws to reduce flicker (matches claude-code's approach).
-      (setq-local vterm--redraw-immididately nil)
+      (setq-local vterm--redraw-immediately nil)
       ;; Reset to running when the user types
       (add-hook 'pre-command-hook #'birbal-process--on-input nil t)
       ;; Remove session from registry if the buffer is killed externally
