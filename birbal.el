@@ -163,7 +163,7 @@ DIRECTORY is the working directory for the session.
 NAME is an optional display name; prompted when called with \\[universal-argument]."
   (interactive
    (list (completing-read "Agent type: "
-                          (hash-table-keys birbal-agent-types)
+                          (mapcar #'symbol-name (hash-table-keys birbal-agent-types))
                           nil t)
          (read-directory-name "Directory: " nil nil t)
          (when current-prefix-arg
