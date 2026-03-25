@@ -85,6 +85,9 @@ named \"*birbal:<name>*\" and the session's buffer slot is updated."
                                         process-environment)))
             (vterm-mode))))
       (setq-local birbal--current-session session)
+      ;; Anchor dired (C-x d) and other directory-sensitive commands to the
+      ;; session's working directory, not Emacs's global default-directory.
+      (setq-local default-directory (file-name-as-directory dir))
       ;; Prevent vterm from overriding our buffer name with a process title.
       (setq-local vterm-buffer-name-string nil)
       ;; Let vterm manage the cursor entirely; without this Emacs renders its
