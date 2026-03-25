@@ -94,6 +94,13 @@ DONE-PATTERNS is a list of regexps signalling session completion."
   :group 'external
   :prefix "birbal-")
 
+(defcustom birbal-term-name "xterm-direct"
+  "TERM environment variable set in birbal vterm buffers.
+\"xterm-direct\" enables 24-bit truecolor.  Use \"xterm-256color\"
+if you encounter compatibility issues with a specific agent."
+  :type 'string
+  :group 'birbal)
+
 ;;; Internal Helpers
 
 (defun birbal--setup-hooks ()

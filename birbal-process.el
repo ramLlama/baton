@@ -15,6 +15,10 @@
 (require 'cl-lib)
 (require 'birbal-session)
 
+(defvar vterm-term-environment-variable)
+(defvar vterm-buffer-name-string)
+(defvar birbal-term-name)
+
 ;;; Pattern Matching (pure, no vterm dependency)
 
 (defun birbal-process--match-patterns (text waiting-patterns done-patterns)
@@ -43,20 +47,24 @@ Returns:
 
 (defun birbal-process-spawn (session)
   "Spawn a vterm buffer for SESSION and start the output watcher.
-Requires the `vterm' feature.  The vterm buffer is hidden from the buffer
-list (space-prefixed name) and the session's buffer slot is updated."
+Requires the `vterm' feature.  The vterm buffer is named
+\" *birbal:<name>*\" (space-prefixed, hidden from the buffer list)
+and the session's buffer slot is updated."
   (unless (featurep 'vterm)
     (error "birbal-process-spawn requires vterm"))
   (require 'vterm)
-  (let* ((id (birbal--session-id session))
-         (dir (or (birbal--session-directory session) default-directory))
+  ;; Set TERM before vterm reads it during buffer initialization.
+  (setq vterm-term-environment-variable birbal-term-name)
+  (let* ((dir (or (birbal--session-directory session) default-directory))
          (command (birbal--session-command session))
-         (buf-name (format " *birbal-vterm-%s*" id))
+         (buf-name (format " *birbal:%s*" (birbal--session-name session)))
          (buf (let ((default-directory (file-name-as-directory dir)))
                 (vterm buf-name))))
     (setf (birbal--session-buffer session) buf)
     (with-current-buffer buf
       (setq-local birbal--current-session session)
+      ;; Prevent vterm from overriding our buffer name with a process title.
+      (setq-local vterm-buffer-name-string nil)
       ;; Reset to running when the user types
       (add-hook 'pre-command-hook #'birbal-process--on-input nil t)
       ;; Remove session from registry if the buffer is killed externally
