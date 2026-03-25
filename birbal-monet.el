@@ -20,7 +20,10 @@
 (require 'birbal-session)
 
 ;; Silence byte-compiler warnings for forward/optional references.
+(defvar birbal-global-map)
+(defvar birbal-list-mode-map)
 (declare-function birbal-add-env-function "birbal" (agent-type fn))
+(declare-function birbal-list--current-session "birbal-notify" ())
 (declare-function monet-session-directory "monet" (session))
 (declare-function monet-make-open-diff-handler "monet" (diff-fn))
 (declare-function monet-make-tool "monet" (&rest plist))
@@ -50,14 +53,19 @@ Returns nil if no match is found."
 (defun birbal-monet--open-diff-handler (params monet-session)
   "Birbal-aware openDiff handler.
 Finds the birbal session for MONET-SESSION's directory, sets it to
-`waiting' with reason \"diff review\", then delegates to monet's diff
-infrastructure.  The birbal session is reset to `running' when the
-user accepts or rejects the diff.
+`waiting' with reason \"diff review\", and stores a thunk under
+`:pending-diff' in the session's metadata.  The diff is not opened
+immediately; call `birbal-review-diff' when ready to review it.
+The birbal session is reset to `running' when the user accepts or
+rejects the diff.
 PARAMS and MONET-SESSION are the standard MCP handler arguments."
   (let* ((dir (monet-session-directory monet-session))
          (birbal-session (birbal-monet--find-session dir))
          (reset (lambda (&rest _)
                   (when birbal-session
+                    (setf (birbal--session-metadata birbal-session)
+                          (plist-put (birbal--session-metadata birbal-session)
+                                     :pending-diff nil))
                     (birbal-session-set-status birbal-session 'running))))
          (diff-fn
           (lambda (old new contents on-accept on-quit sess)
@@ -68,8 +76,36 @@ PARAMS and MONET-SESSION are the standard MCP handler arguments."
              sess)))
          (handler (monet-make-open-diff-handler diff-fn)))
     (when birbal-session
-      (birbal-session-set-status birbal-session 'waiting "diff review"))
-    (funcall handler params monet-session)))
+      (setf (birbal--session-metadata birbal-session)
+            (plist-put (birbal--session-metadata birbal-session)
+                       :pending-diff (lambda () (funcall handler params monet-session))))
+      (birbal-session-set-status birbal-session 'waiting "diff review"))))
+
+;;; User Commands
+
+(defun birbal-review-diff (session-name)
+  "Open the pending diff for the session named SESSION-NAME."
+  (interactive
+   (list (completing-read "Review diff for session: "
+                          (mapcar #'birbal--session-name
+                                  (cl-remove-if-not
+                                   (lambda (s)
+                                     (plist-get (birbal--session-metadata s) :pending-diff))
+                                   (birbal-session-list)))
+                          nil t)))
+  (let ((session (birbal-session-get session-name)))
+    (if-let* ((thunk (plist-get (birbal--session-metadata session) :pending-diff)))
+        (progn
+          (setf (birbal--session-metadata session)
+                (plist-put (birbal--session-metadata session) :pending-diff nil))
+          (funcall thunk))
+      (message "birbal: no pending diff for session %s" session-name))))
+
+(defun birbal-list-review-diff ()
+  "Open the pending diff for the session at point in *Birbal*."
+  (interactive)
+  (when-let* ((session (birbal-list--current-session)))
+    (birbal-review-diff (birbal--session-name session))))
 
 ;;; Setup
 
@@ -89,7 +125,9 @@ Safe to call even if monet is not loaded — does nothing in that case."
      :handler #'birbal-monet--open-diff-handler
      :set :birbal)
     (monet-enable-tool-set :birbal)
-    (birbal-add-env-function 'claude-code #'monet-start-server-function)))
+    (birbal-add-env-function 'claude-code #'monet-start-server-function)
+    (define-key birbal-global-map (kbd "d") #'birbal-review-diff)
+    (define-key birbal-list-mode-map (kbd "r") #'birbal-list-review-diff)))
 
 (provide 'birbal-monet)
 ;;; birbal-monet.el ends here

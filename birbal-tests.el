@@ -412,6 +412,44 @@
                                            :directory "/proj")))
       (should (eq s-claude (birbal-monet--find-session "/proj"))))))
 
+(ert-deftest birbal-test-monet-open-diff-defers ()
+  "birbal-monet--open-diff-handler stores :pending-diff and sets status to waiting."
+  (birbal-test-with-clean-state
+    (let* ((s (birbal-session-create :agent-type 'claude-code
+                                     :command "claude"
+                                     :directory "/proj"))
+           ;; Stub monet functions
+           (monet-session (list :directory "/proj"))
+           thunk-called)
+      (cl-letf (((symbol-function 'monet-session-directory)
+                 (lambda (_ms) "/proj"))
+                ((symbol-function 'monet-make-open-diff-handler)
+                 (lambda (diff-fn) (lambda (_params _ms) (funcall diff-fn nil nil nil nil nil nil))))
+                ((symbol-function 'monet-ediff-tool)
+                 (lambda (_old _new _contents _accept _quit _sess)
+                   (setq thunk-called t))))
+        (birbal-monet--open-diff-handler nil monet-session)
+        ;; Status is set to waiting
+        (should (eq (birbal--session-status s) 'waiting))
+        (should (equal (birbal--session-waiting-reason s) "diff review"))
+        ;; A thunk was stored but NOT yet called
+        (should (plist-get (birbal--session-metadata s) :pending-diff))
+        (should-not thunk-called)))))
+
+(ert-deftest birbal-test-monet-review-diff-invokes-thunk ()
+  "birbal-review-diff calls the stored thunk and clears :pending-diff."
+  (birbal-test-with-clean-state
+    (let* ((s (birbal-session-create :agent-type 'claude-code
+                                     :command "claude"
+                                     :directory "/proj"))
+           thunk-called)
+      (setf (birbal--session-metadata s)
+            (plist-put (birbal--session-metadata s)
+                       :pending-diff (lambda () (setq thunk-called t))))
+      (birbal-review-diff (birbal--session-name s))
+      (should thunk-called)
+      (should (null (plist-get (birbal--session-metadata s) :pending-diff))))))
+
 (ert-deftest birbal-test-monet-setup-enables-birbal-set ()
   "birbal-monet-setup registers openDiff in :birbal set and enables it."
   (skip-unless (featurep 'monet))
