@@ -87,7 +87,69 @@ DONE-PATTERNS is a list of regexps signalling session completion."
    ("\\[y/N\\]" . "confirmation"))
  :done-patterns '("Bye!" "Session complete"))
 
+;;; Customization Group
+
+(defgroup birbal nil
+  "Manage multiple AI coding agents from Emacs."
+  :group 'external
+  :prefix "birbal-")
+
+;;; Internal Helpers
+
+(defun birbal--setup-hooks ()
+  "Add birbal notification hooks."
+  (add-hook 'birbal-session-status-changed-hook #'birbal-notify--on-status-changed)
+  (add-hook 'birbal-session-created-hook        #'birbal-notify--on-session-event)
+  (add-hook 'birbal-session-killed-hook         #'birbal-notify--on-session-event))
+
+(defun birbal--teardown-hooks ()
+  "Remove birbal notification hooks."
+  (remove-hook 'birbal-session-status-changed-hook #'birbal-notify--on-status-changed)
+  (remove-hook 'birbal-session-created-hook        #'birbal-notify--on-session-event)
+  (remove-hook 'birbal-session-killed-hook         #'birbal-notify--on-session-event))
+
 ;;; User Commands
+
+(defun birbal-kill (session-name)
+  "Kill the session named SESSION-NAME."
+  (interactive
+   (list (completing-read "Kill session: "
+                          (mapcar #'birbal--session-name (birbal-session-list))
+                          nil t)))
+  (let ((session (cl-find session-name (birbal-session-list)
+                           :key #'birbal--session-name
+                           :test #'equal)))
+    (if session
+        (birbal-session-kill session)
+      (message "birbal: no session named %s" session-name))))
+
+(defun birbal-kill-all ()
+  "Kill all active sessions."
+  (interactive)
+  (birbal-session-kill-all)
+  (message "birbal: all sessions killed"))
+
+(defun birbal-send-return (session-name)
+  "Send RET to the session named SESSION-NAME."
+  (interactive
+   (list (completing-read "Send RET to: "
+                          (mapcar #'birbal--session-name (birbal-session-list))
+                          nil t)))
+  (when-let* ((session (cl-find session-name (birbal-session-list)
+                                :key #'birbal--session-name
+                                :test #'equal)))
+    (birbal-process-send-input session "\n")))
+
+(defun birbal-send-escape (session-name)
+  "Send ESC to the session named SESSION-NAME."
+  (interactive
+   (list (completing-read "Send ESC to: "
+                          (mapcar #'birbal--session-name (birbal-session-list))
+                          nil t)))
+  (when-let* ((session (cl-find session-name (birbal-session-list)
+                                :key #'birbal--session-name
+                                :test #'equal)))
+    (birbal-process-send-key session "ESC")))
 
 ;;;###autoload
 (defun birbal-new (agent-type-name directory)
@@ -120,84 +182,6 @@ DIRECTORY is the working directory for the session."
       session)))
 
 ;;;###autoload
-(defun birbal-kill (session-name)
-  "Kill the session named SESSION-NAME."
-  (interactive
-   (list (completing-read "Kill session: "
-                          (mapcar #'birbal--session-name (birbal-session-list))
-                          nil t)))
-  (let ((session (cl-find session-name (birbal-session-list)
-                           :key #'birbal--session-name
-                           :test #'equal)))
-    (if session
-        (birbal-session-kill session)
-      (message "birbal: no session named %s" session-name))))
-
-;;;###autoload
-(defun birbal-kill-all ()
-  "Kill all active sessions."
-  (interactive)
-  (birbal-session-kill-all)
-  (message "birbal: all sessions killed"))
-
-;;; Quick Input Actions
-
-;;;###autoload
-(defun birbal-send-return (session-name)
-  "Send RET to the session named SESSION-NAME."
-  (interactive
-   (list (completing-read "Send RET to: "
-                          (mapcar #'birbal--session-name (birbal-session-list))
-                          nil t)))
-  (when-let* ((session (cl-find session-name (birbal-session-list)
-                                :key #'birbal--session-name
-                                :test #'equal)))
-    (birbal-process-send-input session "\n")))
-
-;;;###autoload
-(defun birbal-send-escape (session-name)
-  "Send ESC to the session named SESSION-NAME."
-  (interactive
-   (list (completing-read "Send ESC to: "
-                          (mapcar #'birbal--session-name (birbal-session-list))
-                          nil t)))
-  (when-let* ((session (cl-find session-name (birbal-session-list)
-                                :key #'birbal--session-name
-                                :test #'equal)))
-    (birbal-process-send-key session "ESC")))
-
-;;; Global Keymap
-
-(defvar birbal-global-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "n") #'birbal-new)
-    (define-key map (kbd "k") #'birbal-kill)
-    (define-key map (kbd "K") #'birbal-kill-all)
-    (define-key map (kbd "l") #'birbal-list)
-    (define-key map (kbd "j") #'birbal-jump)
-    (define-key map (kbd "w") #'birbal-jump-to-waiting)
-    (define-key map (kbd "r") #'birbal-send-return)
-    (define-key map (kbd "e") #'birbal-send-escape)
-    map)
-  "Keymap for birbal commands.
-Bind this under a prefix key, e.g.:
-  (global-set-key (kbd \"C-c b\") birbal-global-map)")
-
-;;; Global Minor Mode
-
-(defun birbal--setup-hooks ()
-  "Add birbal notification hooks."
-  (add-hook 'birbal-session-status-changed-hook #'birbal-notify--on-status-changed)
-  (add-hook 'birbal-session-created-hook        #'birbal-notify--on-session-event)
-  (add-hook 'birbal-session-killed-hook         #'birbal-notify--on-session-event))
-
-(defun birbal--teardown-hooks ()
-  "Remove birbal notification hooks."
-  (remove-hook 'birbal-session-status-changed-hook #'birbal-notify--on-status-changed)
-  (remove-hook 'birbal-session-created-hook        #'birbal-notify--on-session-event)
-  (remove-hook 'birbal-session-killed-hook         #'birbal-notify--on-session-event))
-
-;;;###autoload
 (define-minor-mode birbal-mode
   "Global minor mode for managing AI coding agents with birbal."
   :global t
@@ -218,12 +202,21 @@ Bind this under a prefix key, e.g.:
     (birbal--teardown-hooks)
     (birbal-modeline-mode -1)))
 
-;;; Customization Group
-
-(defgroup birbal nil
-  "Manage multiple AI coding agents from Emacs."
-  :group 'external
-  :prefix "birbal-")
+;;;###autoload
+(defvar birbal-global-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "n") #'birbal-new)
+    (define-key map (kbd "k") #'birbal-kill)
+    (define-key map (kbd "K") #'birbal-kill-all)
+    (define-key map (kbd "l") #'birbal-list)
+    (define-key map (kbd "j") #'birbal-jump)
+    (define-key map (kbd "w") #'birbal-jump-to-waiting)
+    (define-key map (kbd "r") #'birbal-send-return)
+    (define-key map (kbd "e") #'birbal-send-escape)
+    map)
+  "Keymap for birbal commands.
+Bind this under a prefix key, e.g.:
+  (global-set-key (kbd \"C-c b\") birbal-global-map)")
 
 (provide 'birbal)
 ;;; birbal.el ends here

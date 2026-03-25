@@ -17,7 +17,7 @@ MATCH ?=
 default: all
 
 clean:
-	rm -f *.elc
+	rm -f *.elc birbal-autoloads.el
 
 checkdoc:
 	for FILE in $(EL_FILES) birbal-tests.el; do \
@@ -32,6 +32,7 @@ compile: clean
 	$(EMACS) --batch $(LOAD_PATHS) \
 	  --eval "(package-initialize)" \
 	  --eval "(setq sentence-end-double-space nil)" \
+	  --eval "(package-generate-autoloads \"birbal\" \".\")" \
 	  -f batch-byte-compile $(EL_FILES) 2>&1 | grep -v "vterm" || true
 
 test:
