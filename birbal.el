@@ -23,7 +23,7 @@
 ;;   M-x birbal-kill      — kill a session
 ;;
 ;; Monet integration (optional):
-;;   (birbal-bridge-setup) after loading monet.
+;;   (birbal-monet-setup) after loading monet.
 
 ;;; Code:
 (require 'cl-lib)
@@ -31,25 +31,38 @@
 (require 'birbal-process)
 (require 'birbal-notify)
 
-(declare-function birbal-bridge-setup "birbal-bridge" ())
+(declare-function birbal-monet-setup "birbal-monet" ())
 
 ;;; Agent-Type Registry
 
 (defvar birbal-agent-types (make-hash-table :test 'eq)
   "Hash table mapping agent-type symbols to their definition plists.
-Each plist has keys: :command, :args, :waiting-patterns, :done-patterns.")
+Each plist has keys: :command, :args, :waiting-patterns, :env-functions.")
 
-(cl-defun birbal-define-agent-type (&key name command (args nil) waiting-patterns)
+(cl-defun birbal-define-agent-type (&key name command (args nil) waiting-patterns (env-functions nil))
   "Define or redefine an agent type.
 NAME is a symbol (e.g. `claude-code').
 COMMAND is the shell command string.
 ARGS is a list of default arguments (default: nil).
-WAITING-PATTERNS is an alist of (REGEXP . REASON)."
+WAITING-PATTERNS is an alist of (REGEXP . REASON).
+ENV-FUNCTIONS is a list of functions (KEY DIRECTORY) -> list of
+\"VAR=VALUE\" strings (default: nil)."
   (puthash name
            (list :command command
                  :args args
-                 :waiting-patterns waiting-patterns)
+                 :waiting-patterns waiting-patterns
+                 :env-functions env-functions)
            birbal-agent-types))
+
+(defun birbal-add-env-function (agent-type fn)
+  "Append FN to the env-functions list for AGENT-TYPE.
+FN must accept (KEY DIRECTORY) and return a list of \"VAR=VALUE\" strings.
+AGENT-TYPE is a symbol key in `birbal-agent-types'."
+  (when-let* ((def (gethash agent-type birbal-agent-types)))
+    (puthash agent-type
+             (plist-put def :env-functions
+                        (append (plist-get def :env-functions) (list fn)))
+             birbal-agent-types)))
 
 ;;; Built-in Agent Types
 
@@ -200,14 +213,14 @@ NAME is an optional display name; prompted when called with \\[universal-argumen
       (progn
         (birbal--setup-hooks)
         (birbal-modeline-mode 1)
-        ;; Wire monet bridge if monet is already loaded
+        ;; Wire monet integration if monet is already loaded
         (when (featurep 'monet)
-          (require 'birbal-bridge)
-          (birbal-bridge-setup))
-        ;; Wire monet bridge when monet loads later
+          (require 'birbal-monet)
+          (birbal-monet-setup))
+        ;; Wire monet integration when monet loads later
         (with-eval-after-load 'monet
-          (require 'birbal-bridge)
-          (birbal-bridge-setup)))
+          (require 'birbal-monet)
+          (birbal-monet-setup)))
     (birbal--teardown-hooks)
     (birbal-modeline-mode -1)))
 

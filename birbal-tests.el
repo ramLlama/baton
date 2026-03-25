@@ -5,7 +5,7 @@
 
 ;;; Commentary:
 ;; ERT tests for birbal-session, birbal-process (pure), birbal-notify,
-;; birbal agent-type registry, and birbal-bridge.
+;; birbal agent-type registry, and birbal-monet.
 ;;
 ;; Run via Makefile:
 ;;   make test
@@ -16,7 +16,7 @@
 (require 'birbal-process)
 (require 'birbal-notify)
 (require 'birbal)
-(require 'birbal-bridge)
+(require 'birbal-monet)
 
 ;;; Test Isolation
 
@@ -381,19 +381,19 @@
               ('kill (birbal-session-kill session))))))
       (should (null (birbal-session-get id))))))
 
-;;; ─── birbal-bridge tests ─────────────────────────────────────────────────────
+;;; ─── birbal-monet tests ──────────────────────────────────────────────────────
 
-(ert-deftest birbal-test-bridge-find-session-by-directory ()
-  "birbal-bridge--find-session matches a session by directory."
+(ert-deftest birbal-test-monet-find-session-by-directory ()
+  "birbal-monet--find-session matches a session by directory."
   (birbal-test-with-clean-state
     (let ((s (birbal-session-create :agent-type 'claude-code
                                     :command "claude"
                                     :directory "/my/project")))
-      (should (eq s (birbal-bridge--find-session "/my/project")))
-      (should (null (birbal-bridge--find-session "/other"))))))
+      (should (eq s (birbal-monet--find-session "/my/project")))
+      (should (null (birbal-monet--find-session "/other"))))))
 
-(ert-deftest birbal-test-bridge-find-session-prefers-claude-code ()
-  "birbal-bridge--find-session prefers claude-code when multiple sessions match."
+(ert-deftest birbal-test-monet-find-session-prefers-claude-code ()
+  "birbal-monet--find-session prefers claude-code when multiple sessions match."
   (birbal-test-with-clean-state
     (let ((s-aider  (birbal-session-create :agent-type 'aider
                                            :command "aider"
@@ -401,16 +401,61 @@
           (s-claude (birbal-session-create :agent-type 'claude-code
                                            :command "claude"
                                            :directory "/proj")))
-      (should (eq s-claude (birbal-bridge--find-session "/proj"))))))
+      (should (eq s-claude (birbal-monet--find-session "/proj"))))))
 
-(ert-deftest birbal-test-bridge-setup-enables-birbal-set ()
-  "birbal-bridge-setup registers openDiff in :birbal set and enables it."
+(ert-deftest birbal-test-monet-setup-enables-birbal-set ()
+  "birbal-monet-setup registers openDiff in :birbal set and enables it."
   (skip-unless (featurep 'monet))
-  (let ((monet--tool-registry nil)
-        (monet--enabled-sets '(:core :simple-diff)))
-    (birbal-bridge-setup)
-    (should (assoc (cons :birbal "openDiff") monet--tool-registry))
-    (should (memq :birbal monet--enabled-sets))))
+  (birbal-test-with-clean-state
+    (birbal-define-agent-type :name 'claude-code :command "claude" :waiting-patterns nil)
+    (let ((monet--tool-registry nil)
+          (monet--enabled-sets '(:core :simple-diff))
+          (monet-open-diff-tool-schema nil))
+      (birbal-monet-setup)
+      (should (assoc (cons :birbal "openDiff") monet--tool-registry))
+      (should (memq :birbal monet--enabled-sets)))))
+
+;;; ─── birbal-process env-functions tests ──────────────────────────────────────
+
+(ert-deftest birbal-test-env-functions-nil-by-default ()
+  "birbal-define-agent-type without :env-functions stores nil."
+  (birbal-test-with-clean-state
+    (birbal-define-agent-type :name 'test-agent :command "cmd" :waiting-patterns nil)
+    (should (null (plist-get (gethash 'test-agent birbal-agent-types) :env-functions)))))
+
+(ert-deftest birbal-test-env-functions-add-appends ()
+  "birbal-add-env-function appends; calling twice gives two entries in order."
+  (birbal-test-with-clean-state
+    (birbal-define-agent-type :name 'test-agent :command "cmd" :waiting-patterns nil)
+    (let ((fn1 (lambda (_k _d) '("A=1")))
+          (fn2 (lambda (_k _d) '("B=2"))))
+      (birbal-add-env-function 'test-agent fn1)
+      (birbal-add-env-function 'test-agent fn2)
+      (let ((fns (plist-get (gethash 'test-agent birbal-agent-types) :env-functions)))
+        (should (= 2 (length fns)))
+        (should (eq (nth 0 fns) fn1))
+        (should (eq (nth 1 fns) fn2))))))
+
+(ert-deftest birbal-test-env-functions-multiple-combined ()
+  "Multiple env-functions results are flattened via apply #'append."
+  (birbal-test-with-clean-state
+    (let* ((fn1 (lambda (_k _d) '("A=1")))
+           (fn2 (lambda (_k _d) '("B=2" "C=3")))
+           (env-fns (list fn1 fn2))
+           (extra-env (apply #'append
+                             (mapcar (lambda (f) (funcall f "id" "/tmp")) env-fns))))
+      (should (equal extra-env '("A=1" "B=2" "C=3"))))))
+
+(ert-deftest birbal-test-env-functions-nil-produces-no-extra-env ()
+  "nil :env-functions does not produce extra env vars."
+  (birbal-test-with-clean-state
+    (birbal-define-agent-type :name 'test-agent :command "cmd" :waiting-patterns nil)
+    (let* ((def (gethash 'test-agent birbal-agent-types))
+           (env-fns (plist-get def :env-functions))
+           (extra-env (when env-fns
+                        (apply #'append
+                               (mapcar (lambda (f) (funcall f "id" "/tmp")) env-fns)))))
+      (should (null extra-env)))))
 
 (provide 'birbal-tests)
 ;;; birbal-tests.el ends here

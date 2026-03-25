@@ -20,6 +20,7 @@
 (defvar vterm-buffer-name-string)
 (defvar vterm--redraw-immediately)
 (defvar birbal-term-name)
+(defvar birbal-agent-types)
 
 (declare-function vterm-mode          "vterm" ())
 (declare-function vterm-send-string   "vterm" (string &optional paste-p))
@@ -71,7 +72,18 @@ named \"*birbal:<name>*\" and the session's buffer slot is updated."
         ;; pop-to-buffer then switches focus to the buffer.
         (save-selected-window
           (pop-to-buffer buf)
-          (vterm-mode)))
+          (let* ((agent-def (gethash (birbal--session-agent-type session)
+                                     birbal-agent-types))
+                 (env-fns   (and agent-def (plist-get agent-def :env-functions)))
+                 (extra-env (when env-fns
+                              (apply #'append
+                                     (mapcar (lambda (fn)
+                                               (funcall fn (birbal--session-id session) dir))
+                                             env-fns))))
+                 (process-environment (if extra-env
+                                          (append extra-env process-environment)
+                                        process-environment)))
+            (vterm-mode))))
       (setq-local birbal--current-session session)
       ;; Prevent vterm from overriding our buffer name with a process title.
       (setq-local vterm-buffer-name-string nil)

@@ -19,7 +19,7 @@ LOAD_PATHS := -L . \
               $(if $(VTERM_DIR),-L $(VTERM_DIR))
 
 EL_FILES := birbal-session.el birbal-process.el birbal-notify.el \
-            birbal-bridge.el birbal.el
+            birbal-monet.el birbal.el
 
 MATCH ?=
 
