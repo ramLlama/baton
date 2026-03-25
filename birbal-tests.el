@@ -48,8 +48,17 @@
     (let* ((s (birbal-session-create :agent-type 'claude-code
                                      :command "claude"
                                      :directory "/tmp"))
-           (found (birbal-session-get (birbal--session-id s))))
+           (found (birbal-session-get (birbal--session-name s))))
       (should (eq s found)))))
+
+(ert-deftest birbal-test-session-create-duplicate-name-errors ()
+  "Creating a session with a name that already exists signals an error."
+  (birbal-test-with-clean-state
+    (birbal-session-create :agent-type 'claude-code :command "claude"
+                           :directory "/tmp" :name "my-agent")
+    (should-error (birbal-session-create :agent-type 'claude-code :command "claude"
+                                         :directory "/tmp" :name "my-agent")
+                  :type 'error)))
 
 (ert-deftest birbal-test-session-create-auto-name ()
   "Auto-names use agent-type short prefix and incrementing counter."
@@ -137,7 +146,7 @@
   (birbal-test-with-clean-state
     (let ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp")))
       (birbal-session-kill s)
-      (should (null (birbal-session-get (birbal--session-id s))))
+      (should (null (birbal-session-get (birbal--session-name s))))
       (should (= 0 (length (birbal-session-list)))))))
 
 (ert-deftest birbal-test-session-kill-fires-hook ()
@@ -363,14 +372,14 @@
       (let ((entries (birbal-notify--list-entries)))
         (should (= 2 (length entries)))
         ;; First entry ID should be s1's ID
-        (should (equal (birbal--session-id s1) (car (nth 0 entries))))
-        (should (equal (birbal--session-id s2) (car (nth 1 entries))))))))
+        (should (equal (birbal--session-name s1) (car (nth 0 entries))))
+        (should (equal (birbal--session-name s2) (car (nth 1 entries))))))))
 
 (ert-deftest birbal-test-status-buffer-mark-and-kill ()
   "birbal-list-execute kills sessions flagged in birbal--list-marks."
   (birbal-test-with-clean-state
     (let* ((s (birbal-session-create :agent-type 'claude-code :command "claude" :directory "/tmp"))
-           (id (birbal--session-id s))
+           (id (birbal--session-name s))
            ;; Simulate the buffer-local marks
            (marks (list (cons id 'kill))))
       ;; Execute manually (without a real buffer)

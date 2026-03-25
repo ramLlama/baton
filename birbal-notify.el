@@ -157,7 +157,7 @@ omitted when no unread sessions.  The whole string is highlighted in
 
 (defun birbal-notify--format-entry (session marks)
   "Return a tabulated-list entry for SESSION given current MARKS alist."
-  (let* ((id (birbal--session-id session))
+  (let* ((id (birbal--session-name session))
          (mark-char (if (assoc id marks) "D" " "))
          (face (birbal-notify--session-face session))
          (name (propertize (birbal--session-name session) 'face face))

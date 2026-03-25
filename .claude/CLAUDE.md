@@ -20,9 +20,9 @@ birbal/
   birbal-session.el    -- Session struct (cl-defstruct), hash-table registries, lifecycle hooks
   birbal-process.el    -- vterm spawning, 500ms debounced output watcher, pure pattern matcher
   birbal-notify.el     -- Modeline segment B[Nw/Ni/Nr N*], *Birbal* tabulated-list buffer, birbal-jump
-  birbal-bridge.el     -- Optional monet integration: overrides openDiff tool for diff-review awareness
+  birbal-monet.el      -- Optional monet integration: overrides openDiff tool for diff-review awareness
   birbal.el            -- Agent-type registry, birbal-mode global minor mode, user commands, keymaps
-  birbal-tests.el      -- ERT test suite (36 tests; 1 skipped without monet)
+  birbal-tests.el      -- ERT test suite (41 tests; 1 skipped without monet)
   Makefile             -- checkdoc / compile / test targets
   .gitignore           -- *.elc
   .claude/
@@ -36,20 +36,20 @@ Strict require chain -- each file requires only what it needs:
 1. `birbal-session` -- no birbal dependencies (requires only `cl-lib`)
 2. `birbal-process` -- requires `birbal-session`
 3. `birbal-notify` -- requires `birbal-session`
-4. `birbal-bridge` -- requires `birbal-session` (monet symbols are `declare-function` only)
-5. `birbal` -- requires `birbal-session`, `birbal-process`, `birbal-notify`; conditionally loads `birbal-bridge`
+4. `birbal-monet` -- requires `birbal-session` (monet symbols are `declare-function` only)
+5. `birbal` -- requires `birbal-session`, `birbal-process`, `birbal-notify`; conditionally loads `birbal-monet`
 
 ## Key Concepts & Domain Model
 
 ### Session (`birbal--session`)
 
 The central data structure. A `cl-defstruct` with fields:
-- `id` -- unique timestamp-based string
-- `name` -- display name (auto-generated as `"<agent-prefix>-<n>"` or user-provided)
+- `name` -- unique string, also the registry key (auto-generated as `"<agent-prefix>-<n>"` or user-provided). Duplicates are rejected at creation time with an error.
 - `agent-type` -- symbol key into `birbal-agent-types` (e.g., `'claude-code`, `'aider`)
 - `command`, `directory`, `buffer` -- the shell command, working dir, and vterm buffer
 - `status` -- one of: `running`, `waiting`, `idle`
 - `waiting-reason` -- string describing why the agent is waiting (e.g., "permission prompt")
+- `created-at`, `updated-at` -- `float-time` timestamps
 - `metadata` -- plist for internal state (`:watcher-timer`, `:last-output-hash`, `:last-output-time`, `:current-hash`, `:last-seen-hash`)
 
 ### Agent-Type Registry (`birbal-agent-types`)
@@ -63,7 +63,7 @@ Register new types with `birbal-define-agent-type`. Three built-in: `claude-code
 
 ### Session Registries
 
-- `birbal--sessions` -- hash-table (string ID -> session struct)
+- `birbal--sessions` -- hash-table (session name string -> session struct)
 - `birbal--session-counters` -- hash-table (agent-type symbol -> integer counter)
 
 ### Status Observation
@@ -115,15 +115,15 @@ The pattern matcher (`birbal-process--match-patterns`) is **pure** -- takes `(te
 - **Status buffer**: `*Birbal*` -- `tabulated-list-mode` derivative with ibuffer-style mark/kill/jump; idle sessions show `○` indicator, `○*` when unread
 - **Notification function**: `birbal-notify-function` (default: echo-area message) — called on `waiting` transitions and on unread transitions
 
-### Monet Bridge (Optional)
+### Monet Integration (Optional)
 
-`birbal-bridge.el` intercepts monet's `openDiff` tool via `monet-make-tool :set :birbal`. When Claude Code requests a diff review:
+`birbal-monet.el` intercepts monet's `openDiff` tool via `monet-make-tool :set :birbal`. When Claude Code requests a diff review:
 1. Finds the birbal session matching the monet session's directory
 2. Sets it to `waiting` with reason `"diff review"`
 3. Wraps monet's accept/quit callbacks to reset the birbal session to `running`
-4. Uses `cl-letf` to temporarily advise `monet-simple-diff-tool` for callback wrapping
+4. Delegates to `monet-make-open-diff-handler` with a custom diff function that wraps the callbacks
 
-`birbal-mode` automatically calls `birbal-bridge-setup` when monet is loaded (via `with-eval-after-load`).
+`birbal-mode` automatically calls `birbal-monet-setup` when monet is loaded (via `with-eval-after-load`).
 
 ## Development Workflow
 
@@ -134,8 +134,8 @@ Ensure `vterm` is installed in your Emacs. Optionally clone monet to `../monet`.
 ### Run tests
 
 ```bash
-make test                        # all tests (35 pass, 1 skipped without monet)
-make test MATCH=bridge           # run only tests matching "bridge"
+make test                        # all tests (40 pass, 1 skipped without monet)
+make test MATCH=monet            # run only tests matching "monet"
 make test MONET_DIR=../monet     # include monet for full coverage
 ```
 
@@ -171,9 +171,9 @@ M-x ert RET birbal-test-session-create-returns-struct RET
 
 6. **The test isolation macro `birbal-test-with-clean-state`** rebinds all global state (sessions, counters, agent-types, hooks including `birbal-session-unread-changed-hook`) with `let`. Always use it in tests to avoid cross-contamination.
 
-7. **The bridge test requires monet** (`skip-unless (featurep 'monet)`). Set `MONET_DIR=../monet` in make invocations for full test coverage.
+7. **The monet test requires monet** (`skip-unless (featurep 'monet)`). Set `MONET_DIR=../monet` in make invocations for full test coverage.
 
-8. **`birbal-bridge.el` uses `cl-letf` for temporary function advice** on `monet-simple-diff-tool`. This is scoped and does not persist.
+8. **`birbal-monet.el` wraps monet callbacks** by passing a custom diff function to `monet-make-open-diff-handler` that intercepts accept/quit to reset birbal session status.
 
 9. **`birbal-mode` is a global minor mode**. Enabling it wires hooks, enables `birbal-modeline-mode`, and sets up the monet bridge. Disabling it tears down hooks and the modeline.
 
@@ -181,7 +181,11 @@ M-x ert RET birbal-test-session-create-returns-struct RET
 
 11. **Session auto-naming** uses the first segment of the agent-type symbol name (e.g., `claude-code` -> `"claude-1"`). The counter is per agent-type. `C-u birbal-new` prompts for an explicit name.
 
-12. **`birbal-bridge--find-session`** prefers `claude-code` sessions when multiple sessions share a directory. This is intentional -- monet integration is specific to Claude Code.
+12. **`birbal-monet--find-session`** prefers `claude-code` sessions when multiple sessions share a directory. This is intentional -- monet integration is specific to Claude Code.
+
+13. **Duplicate session names are rejected**. `birbal-session-create` signals an error if a session with the given name already exists. There is no separate `id` field -- `name` is the unique identifier and registry key.
+
+14. **Monet `ideName` format** in lockfiles is `"Emacs (<session-key> @ <port>)"`, not just `"Emacs (<session-key>)"`. The port disambiguates multiple Emacs instances.
 
 ## Style Conventions
 

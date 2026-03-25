@@ -78,7 +78,7 @@ named \"*birbal:<name>*\" and the session's buffer slot is updated."
                  (extra-env (when env-fns
                               (apply #'append
                                      (mapcar (lambda (fn)
-                                               (funcall fn (birbal--session-id session) dir))
+                                               (funcall fn (birbal--session-name session) dir))
                                              env-fns))))
                  (process-environment (if extra-env
                                           (append extra-env process-environment)
@@ -135,7 +135,7 @@ timer and removes the session from the registry without trying to kill
 the buffer again (it is already being killed)."
   (when birbal--current-session
     (let* ((session birbal--current-session)
-           (id (birbal--session-id session)))
+           (id (birbal--session-name session)))
       ;; Cancel watcher timer
       (when-let* ((timer (plist-get (birbal--session-metadata session) :watcher-timer)))
         (cancel-timer timer))

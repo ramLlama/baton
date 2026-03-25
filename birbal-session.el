@@ -14,8 +14,7 @@
 
 (cl-defstruct birbal--session
   "An AI agent session managed by birbal."
-  id              ; unique string (timestamp-based)
-  name            ; display name ("claude-1", "aider-1", or user-provided)
+  name            ; unique string, also used as registry key ("claude-1", or user-provided)
   agent-type      ; symbol, key into birbal-agent-types
   command         ; string, the shell command that was run
   directory       ; string, working directory
@@ -54,10 +53,6 @@ Each function is called with one argument: SESSION.")
 
 ;;; Internal Helpers
 
-(defun birbal--generate-id ()
-  "Generate a unique session ID based on current time."
-  (format "%.6f-%d" (float-time) (random 100000)))
-
 (defun birbal--agent-type-short-name (agent-type)
   "Return the display prefix for AGENT-TYPE symbol.
 For `claude-code', returns \"claude\"; for `aider', returns \"aider\"."
@@ -80,27 +75,27 @@ DIRECTORY is the working directory.
 NAME is optional; auto-generated from AGENT-TYPE if omitted.
 Returns the new `birbal--session'."
   (let* ((session-name (or name (birbal--next-session-name agent-type)))
-         (id (birbal--generate-id))
-         (now (float-time))
-         (session (make-birbal--session
-                   :id id
-                   :name session-name
-                   :agent-type agent-type
-                   :command command
-                   :directory directory
-                   :buffer nil
-                   :status 'running
-                   :waiting-reason nil
-                   :created-at now
-                   :updated-at now
-                   :metadata nil)))
-    (puthash id session birbal--sessions)
-    (run-hook-with-args 'birbal-session-created-hook session)
-    session))
+         (now (float-time)))
+    (when (gethash session-name birbal--sessions)
+      (error "A birbal session named %S already exists" session-name))
+    (let* ((session (make-birbal--session
+                     :name session-name
+                     :agent-type agent-type
+                     :command command
+                     :directory directory
+                     :buffer nil
+                     :status 'running
+                     :waiting-reason nil
+                     :created-at now
+                     :updated-at now
+                     :metadata nil)))
+      (puthash session-name session birbal--sessions)
+      (run-hook-with-args 'birbal-session-created-hook session)
+      session)))
 
-(defun birbal-session-get (id)
-  "Return the session with ID, or nil if not found."
-  (gethash id birbal--sessions))
+(defun birbal-session-get (name)
+  "Return the session with NAME, or nil if not found."
+  (gethash name birbal--sessions))
 
 (defun birbal-session-list (&optional status)
   "Return a list of all sessions.
@@ -130,20 +125,19 @@ When NEW-STATUS is not `waiting', clears the waiting-reason."
 (defun birbal-session-kill (session)
   "Kill SESSION: cancel its watcher, kill its buffer, remove from registry.
 Fires `birbal-session-killed-hook'."
-  (let ((id (birbal--session-id session)))
-    ;; Cancel any watcher timer
-    (when-let* ((timer (plist-get (birbal--session-metadata session) :watcher-timer)))
-      (cancel-timer timer))
-    ;; Kill the vterm buffer if alive
-    (when-let* ((buf (birbal--session-buffer session)))
-      (when (buffer-live-p buf)
-        (with-current-buffer buf
-          (set-buffer-modified-p nil))
-        (let ((kill-buffer-query-functions nil))
-          (kill-buffer buf))))
-    ;; Remove from registry
-    (remhash id birbal--sessions)
-    (run-hook-with-args 'birbal-session-killed-hook session)))
+  ;; Cancel any watcher timer
+  (when-let* ((timer (plist-get (birbal--session-metadata session) :watcher-timer)))
+    (cancel-timer timer))
+  ;; Kill the vterm buffer if alive
+  (when-let* ((buf (birbal--session-buffer session)))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (set-buffer-modified-p nil))
+      (let ((kill-buffer-query-functions nil))
+        (kill-buffer buf))))
+  ;; Remove from registry
+  (remhash (birbal--session-name session) birbal--sessions)
+  (run-hook-with-args 'birbal-session-killed-hook session))
 
 (defun birbal-session-kill-all ()
   "Kill all registered sessions."

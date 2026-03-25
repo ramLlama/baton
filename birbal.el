@@ -213,11 +213,7 @@ NAME is an optional display name; prompted when called with \\[universal-argumen
       (progn
         (birbal--setup-hooks)
         (birbal-modeline-mode 1)
-        ;; Wire monet integration if monet is already loaded
-        (when (featurep 'monet)
-          (require 'birbal-monet)
-          (birbal-monet-setup))
-        ;; Wire monet integration when monet loads later
+        ;; Wire monet integration (handles both already-loaded and load-later cases)
         (with-eval-after-load 'monet
           (require 'birbal-monet)
           (birbal-monet-setup)))
