@@ -147,7 +147,7 @@ M-x ert RET birbal-test-session-create-returns-struct RET
 
 ## Critical Idiosyncrasies & Gotchas
 
-1. **vterm buffers are space-prefixed** (e.g., `" *birbal-vterm-<id>*"`). This hides them from the buffer list. Use `birbal-list` or `birbal-jump` to navigate to them.
+1. **vterm buffers are NOT space-prefixed** (e.g., `"*birbal:claude-1*"`). They appear in the buffer list. The space-prefix was deliberately removed: vterm's C module applies colors via the `font-lock-face` text property, which requires `font-lock-mode` to be active; `global-font-lock-mode` skips space-prefixed buffers entirely, causing all color rendering to silently fail.
 
 2. **Pattern matching requires quiet period**. The watcher only checks patterns after 500ms of no output change. This debounce prevents false positives on streaming output.
 

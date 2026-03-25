@@ -15,8 +15,10 @@
 (require 'cl-lib)
 (require 'birbal-session)
 
+(defvar vterm-shell)
 (defvar vterm-term-environment-variable)
 (defvar vterm-buffer-name-string)
+(defvar vterm--redraw-immididately)
 (defvar birbal-term-name)
 
 ;;; Pattern Matching (pure, no vterm dependency)
@@ -47,29 +49,48 @@ Returns:
 
 (defun birbal-process-spawn (session)
   "Spawn a vterm buffer for SESSION and start the output watcher.
-Requires the `vterm' feature.  The vterm buffer is named
-\" *birbal:<name>*\" (space-prefixed, hidden from the buffer list)
-and the session's buffer slot is updated."
+Requires the `vterm' feature.  The session command is launched directly
+as the vterm shell (no interactive shell prompt).  The vterm buffer is
+named \"*birbal:<name>*\" and the session's buffer slot is updated."
   (unless (featurep 'vterm)
     (error "birbal-process-spawn requires vterm"))
   (require 'vterm)
-  ;; Set TERM before vterm reads it during buffer initialization.
-  (setq vterm-term-environment-variable birbal-term-name)
   (let* ((dir (or (birbal--session-directory session) default-directory))
          (command (birbal--session-command session))
-         (buf-name (format " *birbal:%s*" (birbal--session-name session)))
-         (buf (let ((default-directory (file-name-as-directory dir)))
-                (vterm buf-name))))
-    (setf (birbal--session-buffer session) buf)
+         (buf-name (format "*birbal:%s*" (birbal--session-name session)))
+         (buf (get-buffer-create buf-name))
+         ;; Dynamic bindings: vterm-mode reads these during initialization.
+         ;; vterm-shell launches the agent command directly instead of $SHELL.
+         (vterm-shell command)
+         (vterm-term-environment-variable birbal-term-name))
     (with-current-buffer buf
+      (let ((default-directory (file-name-as-directory dir)))
+        ;; vterm-mode must run while the buffer is in a real window so the
+        ;; PTY gets the correct terminal size (TIOCGWINSZ).  Deleting the
+        ;; window afterwards resizes the PTY to 0; if the agent process
+        ;; queries the terminal size before the window reappears it will
+        ;; see degenerate dimensions and may disable its TUI/colors.
+        ;; save-selected-window keeps the buffer in a visible window
+        ;; without clobbering the user's selection; birbal-new's
+        ;; pop-to-buffer then switches focus to the buffer.
+        (save-selected-window
+          (pop-to-buffer buf)
+          (vterm-mode)))
       (setq-local birbal--current-session session)
       ;; Prevent vterm from overriding our buffer name with a process title.
       (setq-local vterm-buffer-name-string nil)
+      ;; Let vterm manage the cursor entirely; without this Emacs renders its
+      ;; own cursor at buffer position 0 while vterm's overlay cursor is
+      ;; elsewhere, making it appear as if there is no cursor.
+      (setq-local cursor-type nil)
+      (setq-local cursor-in-non-selected-windows nil)
+      ;; Batch redraws to reduce flicker (matches claude-code's approach).
+      (setq-local vterm--redraw-immididately nil)
       ;; Reset to running when the user types
       (add-hook 'pre-command-hook #'birbal-process--on-input nil t)
       ;; Remove session from registry if the buffer is killed externally
-      (add-hook 'kill-buffer-hook #'birbal-process--on-buffer-killed nil t)
-      (vterm-send-string (concat command "\n")))
+      (add-hook 'kill-buffer-hook #'birbal-process--on-buffer-killed nil t))
+    (setf (birbal--session-buffer session) buf)
     ;; Initialize watcher metadata
     (let ((now (float-time)))
       (setf (birbal--session-metadata session)
