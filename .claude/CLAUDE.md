@@ -211,7 +211,6 @@ Interactive commands (bind `birbal-global-map` under a prefix, e.g., `C-c b`):
 | `l` | `birbal-list`            | Open `*Birbal*` status buffer                    |
 | `j` | `birbal-jump`            | Jump to any session (completing-read)            |
 | `w` | `birbal-jump-to-waiting` | Jump to a waiting session                        |
-| `r` | `birbal-send-return`     | Send RET to a session                            |
-| `e` | `birbal-send-escape`     | Send ESC to a session                            |
+| `d` | `birbal-review-diff`     | Open pending diff (monet integration)            |
 
-Status buffer keybindings (`birbal-list-mode-map`): `d` flag delete, `x` execute, `RET` jump, `N` new, `g` refresh, `m`/`u`/`U` mark/unmark.
+Status buffer keybindings (`birbal-list-mode-map`): `d` flag delete, `x` execute, `RET` jump, `N` new, `g` refresh, `m`/`u`/`U` mark/unmark, `r` review pending diff.

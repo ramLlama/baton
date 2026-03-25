@@ -146,27 +146,6 @@ uses colon-separated RGB codes that libvterm does not render."
   (birbal-session-kill-all)
   (message "birbal: all sessions killed"))
 
-(defun birbal-send-return (session-name)
-  "Send RET to the session named SESSION-NAME."
-  (interactive
-   (list (completing-read "Send RET to: "
-                          (mapcar #'birbal--session-name (birbal-session-list))
-                          nil t)))
-  (when-let* ((session (cl-find session-name (birbal-session-list)
-                                :key #'birbal--session-name
-                                :test #'equal)))
-    (birbal-process-send-input session "\n")))
-
-(defun birbal-send-escape (session-name)
-  "Send ESC to the session named SESSION-NAME."
-  (interactive
-   (list (completing-read "Send ESC to: "
-                          (mapcar #'birbal--session-name (birbal-session-list))
-                          nil t)))
-  (when-let* ((session (cl-find session-name (birbal-session-list)
-                                :key #'birbal--session-name
-                                :test #'equal)))
-    (birbal-process-send-key session "ESC")))
 
 ;;;###autoload
 (defun birbal-new (agent-type-name directory &optional name)
@@ -229,8 +208,7 @@ NAME is an optional display name; prompted when called with \\[universal-argumen
     (define-key map (kbd "l") #'birbal-list)
     (define-key map (kbd "j") #'birbal-jump)
     (define-key map (kbd "w") #'birbal-jump-to-waiting)
-    (define-key map (kbd "r") #'birbal-send-return)
-    (define-key map (kbd "e") #'birbal-send-escape)
+
     map)
   "Keymap for birbal commands.
 Bind this under a prefix key, e.g.:
