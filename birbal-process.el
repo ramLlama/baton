@@ -230,11 +230,10 @@ waiting pattern matches, `idle' otherwise.  Tracks `:current-hash' and
           (setf (birbal--session-metadata session)
                 (plist-put (birbal--session-metadata session) :last-output-time now))
           (setq last-time now))
-        ;; Derive status (guard set-status calls to only fire hook on actual change)
+        ;; Derive status; birbal-session-set-status is a no-op when nothing changed.
         (cond
          (hash-changed
-          (unless (eq (birbal--session-status session) 'running)
-            (birbal-session-set-status session 'running)))
+          (birbal-session-set-status session 'running))
          ((>= (- now last-time) birbal-process--quiet-threshold)
           (let* ((agent-type-sym (birbal--session-agent-type session))
                  (agent-def (and (boundp 'birbal-agent-types)
@@ -247,12 +246,8 @@ waiting pattern matches, `idle' otherwise.  Tracks `:current-hash' and
                              '(:waiting . "diff review")
                            result)))
             (if (and (consp result) (eq (car result) :waiting))
-                (let ((reason (cdr result)))
-                  (unless (and (eq (birbal--session-status session) 'waiting)
-                               (equal (birbal--session-waiting-reason session) reason))
-                    (birbal-session-set-status session 'waiting reason)))
-              (unless (eq (birbal--session-status session) 'idle)
-                (birbal-session-set-status session 'idle))))))
+                (birbal-session-set-status session 'waiting (cdr result))
+              (birbal-session-set-status session 'idle)))))
         ;; Mark session read while buffer is visible
         (when (get-buffer-window buf t)
           (setf (birbal--session-metadata session)

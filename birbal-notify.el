@@ -59,21 +59,15 @@ buffer the user is not currently viewing (unread).")
 Format: \" B[Nw/Ni/Nr N*]\" — segments omitted when zero; `*' count
 omitted when no unread sessions.  The whole string is highlighted in
 `birbal-face-waiting' when any session is waiting."
-  (let* ((sessions (birbal-session-list))
-         (waiting (length (cl-remove-if-not
-                           (lambda (s) (eq (birbal--session-status s) 'waiting))
-                           sessions)))
-         (idle (length (cl-remove-if-not
-                        (lambda (s) (eq (birbal--session-status s) 'idle))
-                        sessions)))
-         (running (length (cl-remove-if-not
-                           (lambda (s) (eq (birbal--session-status s) 'running))
-                           sessions)))
-         (unread (length (cl-remove-if-not
-                          (lambda (s)
-                            (and (not (eq (birbal--session-status s) 'running))
-                                 (birbal-session-unread-p s)))
-                          sessions))))
+  (let ((waiting 0) (idle 0) (running 0) (unread 0))
+    (dolist (s (birbal-session-list))
+      (pcase (birbal--session-status s)
+        ('waiting (cl-incf waiting))
+        ('idle    (cl-incf idle))
+        ('running (cl-incf running)))
+      (when (and (not (eq (birbal--session-status s) 'running))
+                 (birbal-session-unread-p s))
+        (cl-incf unread)))
     (if (zerop (+ waiting idle running))
         ""
       (let* ((parts (delq nil (list (when (> waiting 0) (format "%dw" waiting))

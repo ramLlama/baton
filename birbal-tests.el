@@ -544,6 +544,17 @@ Even when the terminal output matches a different waiting pattern (e.g.
         (should (eq (nth 0 fns) fn1))
         (should (eq (nth 1 fns) fn2))))))
 
+(ert-deftest birbal-test-env-functions-add-idempotent ()
+  "birbal-add-env-function is idempotent: adding the same fn twice gives one entry."
+  (birbal-test-with-clean-state
+    (birbal-define-agent-type :name 'test-agent :command "cmd" :waiting-patterns nil)
+    (let ((fn (lambda (_k _d) '("A=1"))))
+      (birbal-add-env-function 'test-agent fn)
+      (birbal-add-env-function 'test-agent fn)
+      (let ((fns (plist-get (gethash 'test-agent birbal-agent-types) :env-functions)))
+        (should (= 1 (length fns)))
+        (should (eq (car fns) fn))))))
+
 (ert-deftest birbal-test-env-functions-multiple-combined ()
   "Multiple env-functions results are flattened via apply #'append."
   (birbal-test-with-clean-state

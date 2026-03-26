@@ -55,14 +55,16 @@ ENV-FUNCTIONS is a list of functions (KEY DIRECTORY) -> list of
            birbal-agent-types))
 
 (defun birbal-add-env-function (agent-type fn)
-  "Append FN to the env-functions list for AGENT-TYPE.
+  "Add FN to the env-functions list for AGENT-TYPE if not already present.
+Idempotent: calling with the same FN twice has the same effect as calling once.
 FN must accept (KEY DIRECTORY) and return a list of \"VAR=VALUE\" strings.
 AGENT-TYPE is a symbol key in `birbal-agent-types'."
   (when-let* ((def (gethash agent-type birbal-agent-types)))
-    (puthash agent-type
-             (plist-put def :env-functions
-                        (append (plist-get def :env-functions) (list fn)))
-             birbal-agent-types)))
+    (unless (member fn (plist-get def :env-functions))
+      (puthash agent-type
+               (plist-put def :env-functions
+                          (append (plist-get def :env-functions) (list fn)))
+               birbal-agent-types))))
 
 ;;; Built-in Agent Types
 
@@ -110,6 +112,11 @@ uses colon-separated RGB codes that libvterm does not render."
   :group 'birbal)
 
 ;;; Internal Helpers
+
+(defun birbal--on-monet-mode ()
+  "Activate birbal monet integration when monet-mode is enabled."
+  (when monet-mode
+    (birbal-monet-setup)))
 
 (defun birbal--setup-hooks ()
   "Add birbal notification hooks."
@@ -199,8 +206,7 @@ NAME is an optional display name; prompted when called with \\[universal-argumen
         ;; Also handle the case where monet-mode is already active.
         (with-eval-after-load 'monet
           (require 'birbal-monet)
-          (add-hook 'monet-mode-hook
-                    (lambda () (when monet-mode (birbal-monet-setup))))
+          (add-hook 'monet-mode-hook #'birbal--on-monet-mode)
           (when (and (boundp 'monet-mode) monet-mode)
             (birbal-monet-setup))))
     (birbal--teardown-hooks)

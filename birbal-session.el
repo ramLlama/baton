@@ -107,14 +107,17 @@ If STATUS is non-nil, return only sessions with that status symbol."
 
 (defun birbal-session-set-status (session new-status &optional reason)
   "Set SESSION status to NEW-STATUS with optional waiting REASON.
-Fires `birbal-session-status-changed-hook' with (SESSION OLD-STATUS NEW-STATUS).
+Fires `birbal-session-status-changed-hook' with (SESSION OLD-STATUS NEW-STATUS)
+only when the status or waiting-reason actually changes.
 When NEW-STATUS is not `waiting', clears the waiting-reason."
-  (let ((old-status (birbal--session-status session)))
-    (setf (birbal--session-status session) new-status)
-    (setf (birbal--session-waiting-reason session)
-          (when (eq new-status 'waiting) reason))
-    (setf (birbal--session-updated-at session) (float-time))
-    (run-hook-with-args 'birbal-session-status-changed-hook session old-status new-status)))
+  (let ((old-status (birbal--session-status session))
+        (old-reason (birbal--session-waiting-reason session))
+        (new-reason (when (eq new-status 'waiting) reason)))
+    (unless (and (eq old-status new-status) (equal old-reason new-reason))
+      (setf (birbal--session-status session) new-status)
+      (setf (birbal--session-waiting-reason session) new-reason)
+      (setf (birbal--session-updated-at session) (float-time))
+      (run-hook-with-args 'birbal-session-status-changed-hook session old-status new-status))))
 
 (defun birbal-session-find-by-directory (directory)
   "Return the first session whose directory matches DIRECTORY, or nil."
@@ -135,9 +138,14 @@ Fires `birbal-session-killed-hook'."
         (set-buffer-modified-p nil))
       (let ((kill-buffer-query-functions nil))
         (kill-buffer buf))))
-  ;; Remove from registry
-  (remhash (birbal--session-name session) birbal--sessions)
-  (run-hook-with-args 'birbal-session-killed-hook session))
+  ;; Remove from registry and fire hook only when not already done.
+  ;; `birbal-process--on-buffer-killed' runs inside kill-buffer above and
+  ;; already cleans up registry + fires the hook when the buffer had a live
+  ;; session.  Guard here handles the no-buffer case and prevents a second
+  ;; hook invocation.
+  (when (gethash (birbal--session-name session) birbal--sessions)
+    (remhash (birbal--session-name session) birbal--sessions)
+    (run-hook-with-args 'birbal-session-killed-hook session)))
 
 (defun birbal-session-kill-all ()
   "Kill all registered sessions."

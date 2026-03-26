@@ -39,13 +39,19 @@
 
 (defun birbal-monet--find-session (directory)
   "Find the birbal session best matching DIRECTORY.
+Both DIRECTORY and stored session directories are normalized via
+`expand-file-name' and `file-name-as-directory' before comparison,
+so trailing slashes and relative components do not cause mismatches.
 Prefers agent-type `claude-code' when multiple sessions match.
 Returns nil if no match is found."
-  (let ((matches (cl-remove-if-not
-                  (lambda (s)
-                    (and (birbal--session-directory s)
-                         (equal (birbal--session-directory s) directory)))
-                  (birbal-session-list))))
+  (let* ((dir (file-name-as-directory (expand-file-name directory)))
+         (matches (cl-remove-if-not
+                   (lambda (s)
+                     (and (birbal--session-directory s)
+                          (equal (file-name-as-directory
+                                  (expand-file-name (birbal--session-directory s)))
+                                 dir)))
+                   (birbal-session-list))))
     (or (cl-find 'claude-code matches :key #'birbal--session-agent-type)
         (car matches))))
 
