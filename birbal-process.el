@@ -240,7 +240,12 @@ waiting pattern matches, `idle' otherwise.  Tracks `:current-hash' and
                  (agent-def (and (boundp 'birbal-agent-types)
                                  (gethash agent-type-sym birbal-agent-types)))
                  (waiting-patterns (and agent-def (plist-get agent-def :waiting-patterns)))
-                 (result (birbal-process--match-patterns text waiting-patterns)))
+                 (result (birbal-process--match-patterns text waiting-patterns))
+                 ;; Preserve "diff review" while a pending diff awaits the user,
+                 ;; regardless of what patterns the terminal output matches.
+                 (result (if (plist-get meta :pending-diff)
+                             '(:waiting . "diff review")
+                           result)))
             (if (and (consp result) (eq (car result) :waiting))
                 (let ((reason (cdr result)))
                   (unless (and (eq (birbal--session-status session) 'waiting)

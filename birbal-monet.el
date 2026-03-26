@@ -22,6 +22,7 @@
 ;; Silence byte-compiler warnings for forward/optional references.
 (defvar birbal-global-map)
 (defvar birbal-list-mode-map)
+(defvar birbal--current-session)
 (declare-function birbal-add-env-function "birbal" (agent-type fn))
 (declare-function birbal-list--current-session "birbal-notify" ())
 (declare-function monet-session-directory "monet" (session))
@@ -113,6 +114,49 @@ user to accept or reject the diff before continuing."
   (when-let* ((session (birbal-list--current-session)))
     (birbal-review-diff (birbal--session-name session))))
 
+;;; Session Review Bar
+
+(defface birbal-monet-review-bar
+  '((t :inherit warning :weight bold))
+  "Face for the diff review pending bar in birbal session buffers."
+  :group 'birbal)
+
+(defvar birbal--session-review-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "r") #'birbal-review-diff-current)
+    map)
+  "Keymap active in session buffers pending diff review.")
+
+(define-minor-mode birbal--session-review-mode
+  "Minor mode active in session buffers pending diff review.
+Binds `r' to `birbal-review-diff-current' so the user can open the
+pending diff without leaving the buffer."
+  :keymap birbal--session-review-mode-map)
+
+(defun birbal-review-diff-current ()
+  "Open the pending diff for this buffer's birbal session."
+  (interactive)
+  (when-let* ((session birbal--current-session))
+    (birbal-review-diff (birbal--session-name session))))
+
+(defun birbal-monet--update-review-bar (session _old-status _new-status)
+  "Update the diff review callout bar in SESSION's buffer.
+Shows a prominent mode-line bar and activates `birbal--session-review-mode'
+when SESSION is waiting for diff review.  Clears both otherwise."
+  (when-let* ((buf (birbal--session-buffer session)))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (if (and (eq (birbal--session-status session) 'waiting)
+                 (equal (birbal--session-waiting-reason session) "diff review"))
+            (progn
+              (setq-local mode-line-format
+                          (list (propertize
+                                 "  ⏺ DIFF REVIEW PENDING  —  press [r] to open  "
+                                 'face 'birbal-monet-review-bar)))
+              (birbal--session-review-mode 1))
+          (kill-local-variable 'mode-line-format)
+          (birbal--session-review-mode -1))))))
+
 ;;; Setup
 
 ;;;###autoload
@@ -132,8 +176,9 @@ Safe to call even if monet is not loaded — does nothing in that case."
      :set :birbal)
     (monet-enable-tool-set :birbal)
     (birbal-add-env-function 'claude-code #'monet-start-server-function)
-    (define-key birbal-global-map (kbd "d") #'birbal-review-diff)
-    (define-key birbal-list-mode-map (kbd "r") #'birbal-list-review-diff)))
+    (define-key birbal-global-map (kbd "r") #'birbal-review-diff)
+    (define-key birbal-list-mode-map (kbd "r") #'birbal-list-review-diff)
+    (add-hook 'birbal-session-status-changed-hook #'birbal-monet--update-review-bar)))
 
 (provide 'birbal-monet)
 ;;; birbal-monet.el ends here

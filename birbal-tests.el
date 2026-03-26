@@ -450,6 +450,67 @@
       (should thunk-called)
       (should (null (plist-get (birbal--session-metadata s) :pending-diff))))))
 
+(ert-deftest birbal-test-monet-pending-diff-preserves-reason ()
+  "Watcher preserves \"diff review\" reason when :pending-diff is set in metadata.
+Even when the terminal output matches a different waiting pattern (e.g.
+\"confirmation\"), the status must stay \"diff review\" until the diff is reviewed."
+  (birbal-test-with-clean-state
+    (birbal-define-agent-type
+     :name 'claude-code
+     :command "claude"
+     :waiting-patterns '(("Do you want to" . "confirmation")))
+    (let* ((s (birbal-session-create :agent-type 'claude-code
+                                     :command "claude"
+                                     :directory "/proj"))
+           (content "Do you want to make this edit? [Y/n]")
+           (buf (get-buffer-create " *birbal-test-pending-diff*")))
+      (unwind-protect
+          (progn
+            (setf (birbal--session-buffer s) buf)
+            (setf (birbal--session-status s) 'waiting)
+            (setf (birbal--session-waiting-reason s) "diff review")
+            (with-current-buffer buf
+              (insert content))
+            ;; Set up metadata: pending-diff present; output quiet for 10s
+            (let ((hash (with-current-buffer buf
+                          (md5 (buffer-substring-no-properties (point-min) (point-max))))))
+              (setf (birbal--session-metadata s)
+                    (list :pending-diff (lambda () t)
+                          :last-output-hash hash
+                          :last-output-time (- (float-time) 10.0)
+                          :current-hash hash
+                          :last-seen-hash hash
+                          :watcher-timer nil)))
+            (birbal-process--watcher-tick s)
+            (should (eq (birbal--session-status s) 'waiting))
+            (should (equal (birbal--session-waiting-reason s) "diff review")))
+        (kill-buffer buf)))))
+
+(ert-deftest birbal-test-monet-review-bar-activates-on-diff-review ()
+  "birbal-monet--update-review-bar activates mode-line bar and review mode."
+  (birbal-test-with-clean-state
+    (let* ((s (birbal-session-create :agent-type 'claude-code
+                                     :command "claude"
+                                     :directory "/proj"))
+           (buf (get-buffer-create " *birbal-test-review-bar*")))
+      (unwind-protect
+          (progn
+            (setf (birbal--session-buffer s) buf)
+            (setf (birbal--session-status s) 'waiting)
+            (setf (birbal--session-waiting-reason s) "diff review")
+            ;; Simulate status-changed hook call
+            (birbal-monet--update-review-bar s 'running 'waiting)
+            (with-current-buffer buf
+              (should (local-variable-p 'mode-line-format))
+              (should birbal--session-review-mode))
+            ;; Transition to idle: bar should clear
+            (birbal-session-set-status s 'idle)
+            (birbal-monet--update-review-bar s 'waiting 'idle)
+            (with-current-buffer buf
+              (should-not (local-variable-p 'mode-line-format))
+              (should-not birbal--session-review-mode)))
+        (kill-buffer buf)))))
+
 (ert-deftest birbal-test-monet-setup-enables-birbal-set ()
   "birbal-monet-setup registers openDiff in :birbal set and enables it."
   (skip-unless (featurep 'monet))
