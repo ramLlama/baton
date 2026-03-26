@@ -1,2 +1,3 @@
 *.elc
 birbal-autoloads.el
+.claude/agent-memory/
