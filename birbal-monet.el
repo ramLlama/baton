@@ -114,6 +114,31 @@ user to accept or reject the diff before continuing."
   (when-let* ((session (birbal-list--current-session)))
     (birbal-review-diff (birbal--session-name session))))
 
+(defun birbal-clear-pending-diff (session-name)
+  "Clear any pending diff for the session named SESSION-NAME.
+Use this to recover when diff state gets out of sync.  The session
+status is reset to `idle' and the watcher will re-derive it on the
+next tick."
+  (interactive
+   (list (completing-read "Clear pending diff for session: "
+                          (mapcar #'birbal--session-name
+                                  (cl-remove-if-not
+                                   (lambda (s)
+                                     (plist-get (birbal--session-metadata s) :pending-diff))
+                                   (birbal-session-list)))
+                          nil t)))
+  (let ((session (birbal-session-get session-name)))
+    (setf (birbal--session-metadata session)
+          (plist-put (birbal--session-metadata session) :pending-diff nil))
+    (birbal-session-set-status session 'idle)
+    (message "birbal: cleared pending diff for %s" session-name)))
+
+(defun birbal-list-clear-pending-diff ()
+  "Clear the pending diff for the session at point in *Birbal*."
+  (interactive)
+  (when-let* ((session (birbal-list--current-session)))
+    (birbal-clear-pending-diff (birbal--session-name session))))
+
 ;;; Session Review Bar
 
 (defface birbal-monet-review-bar
