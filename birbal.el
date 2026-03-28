@@ -111,6 +111,15 @@ uses colon-separated RGB codes that libvterm does not render."
   :type 'string
   :group 'birbal)
 
+(defcustom birbal-default-agent nil
+  "Default agent used by `birbal-new' when no prefix argument is given.
+When non-nil, must be a symbol naming a registered agent (e.g. `claude-code').
+With a prefix argument, `birbal-new' always prompts for agent regardless of
+this setting."
+  :type '(choice (const :tag "Always prompt" nil)
+                 (symbol :tag "Agent symbol"))
+  :group 'birbal)
+
 ;;; Internal Helpers
 
 (defun birbal--on-monet-mode ()
@@ -159,11 +168,15 @@ uses colon-separated RGB codes that libvterm does not render."
   "Spawn a new agent session.
 AGENT-NAME is a string naming the agent (e.g. \"claude-code\").
 DIRECTORY is the working directory for the session.
-NAME is an optional display name; prompted when called with \\[universal-argument]."
+NAME is an optional display name; prompted when called with \\[universal-argument].
+When `birbal-default-agent' is set, AGENT-NAME defaults to that agent and no
+prompt is shown unless a prefix argument is given."
   (interactive
-   (list (completing-read "Agent: "
-                          (mapcar #'symbol-name (hash-table-keys birbal-agents))
-                          nil t)
+   (list (if (and birbal-default-agent (not current-prefix-arg))
+             (symbol-name birbal-default-agent)
+           (completing-read "Agent: "
+                            (mapcar #'symbol-name (hash-table-keys birbal-agents))
+                            nil t))
          (read-directory-name "Directory: " nil nil t)
          (when current-prefix-arg
            (let ((n (read-string "Session name (empty = auto): ")))
