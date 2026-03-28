@@ -2,7 +2,7 @@
 
 ;; Author: Ram Raghunathan
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1") (vterm "0.0.2"))
+;; Package-Requires: ((emacs "30.1") (vterm) (transient))
 ;; Keywords: tools, ai
 ;; URL: https://github.com/ramraghunathan/baton
 
@@ -17,21 +17,21 @@
 ;;
 ;; Quick start:
 ;;   (baton-mode 1)
-;;   M-x baton-new       — spawn a new agent session
-;;   M-x baton-list      — open the status buffer
-;;   M-x baton-jump      — jump to any session via completing-read
-;;   M-x baton-kill      — kill a session
+;;   (global-set-key (kbd "C-c b") #'baton)
+;;   M-x baton           — open the dispatch menu
 ;;
 ;; Monet integration (optional):
 ;;   (baton-monet-setup) after loading monet.
 
 ;;; Code:
 (require 'cl-lib)
+(require 'transient)
 (require 'baton-session)
 (require 'baton-process)
 (require 'baton-notify)
 
 (declare-function baton-monet-setup "baton-monet" ())
+(declare-function baton-review-diff "baton-monet" (session-name))
 
 ;;; Agent Registry
 
@@ -172,15 +172,24 @@ NAME is an optional display name; prompted when called with \\[universal-argumen
 When `baton-default-agent' is set, AGENT-NAME defaults to that agent and no
 prompt is shown unless a prefix argument is given."
   (interactive
-   (list (if (and baton-default-agent (not current-prefix-arg))
-             (symbol-name baton-default-agent)
-           (completing-read "Agent: "
-                            (mapcar #'symbol-name (hash-table-keys baton-agents))
-                            nil t))
-         (read-directory-name "Directory: " nil nil t)
-         (when current-prefix-arg
-           (let ((n (read-string "Session name (empty = auto): ")))
-             (unless (string-empty-p n) n)))))
+   (let* ((args (and (fboundp 'transient-args)
+                     (transient-args 'baton)))
+          (agent-from-args (and args (transient-arg-value "--agent=" args)))
+          (name-from-args  (and args (transient-arg-value "--name="  args)))
+          (agent-name (or agent-from-args
+                          (and baton-default-agent
+                               (not current-prefix-arg)
+                               (symbol-name baton-default-agent))
+                          (completing-read "Agent: "
+                                           (mapcar #'symbol-name (hash-table-keys baton-agents))
+                                           nil t)))
+          (name (or name-from-args
+                    (when current-prefix-arg
+                      (let ((n (read-string "Session name (empty = auto): ")))
+                        (unless (string-empty-p n) n))))))
+     (list agent-name
+           (read-directory-name "Directory: " nil nil t)
+           name)))
   (let* ((agent (intern agent-name))
          (def (gethash agent baton-agents)))
     (unless def
@@ -225,20 +234,62 @@ prompt is shown unless a prefix argument is given."
     (baton--teardown-hooks)
     (baton-modeline-mode -1)))
 
-;;;###autoload
-(defvar baton-global-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "n") #'baton-new)
-    (define-key map (kbd "k") #'baton-kill)
-    (define-key map (kbd "K") #'baton-kill-all)
-    (define-key map (kbd "l") #'baton-list)
-    (define-key map (kbd "j") #'baton-jump)
-    (define-key map (kbd "w") #'baton-jump-to-waiting)
+;;; Transient Dispatch
 
-    map)
-  "Keymap for baton commands.
-Bind this under a prefix key, e.g.:
-  (global-set-key (kbd \"C-c b\") baton-global-map)")
+(transient-define-infix baton--agent-infix ()
+  "Agent to use for the next `baton-new' invocation (this dispatch only)."
+  :argument "--agent="
+  :class 'transient-option
+  :key "-a"
+  :description "Agent (this spawn)"
+  :reader (lambda (prompt _initial-input _history)
+            (completing-read prompt
+                             (mapcar #'symbol-name (hash-table-keys baton-agents))
+                             nil t)))
+
+(transient-define-infix baton--name-infix ()
+  "Session name to use for the next `baton-new' invocation (this dispatch only)."
+  :argument "--name="
+  :class 'transient-option
+  :key "-n"
+  :description "Name (this spawn)"
+  :reader (lambda (prompt _initial-input _history)
+            (read-string prompt)))
+
+(transient-define-infix baton--default-agent-infix ()
+  "Set the persistent default agent for `baton-new'."
+  :class 'transient-lisp-variable
+  :variable 'baton-default-agent
+  :key "-d"
+  :description "Default agent"
+  :reader (lambda (prompt _initial-input _history)
+            (let* ((agents (mapcar #'symbol-name (hash-table-keys baton-agents)))
+                   (choice (completing-read prompt (cons "none" agents) nil t)))
+              (unless (equal choice "none")
+                (intern choice)))))
+
+;;;###autoload
+(transient-define-prefix baton ()
+  "Dispatch a baton command."
+  [["Sessions"
+    ("-a" baton--agent-infix)
+    ("-n" baton--name-infix)
+    ("n" "New session"        baton-new)
+    ("k" "Kill session"       baton-kill)
+    ("K" "Kill all"           baton-kill-all)]
+   ["Navigate"
+    ("l" "List sessions"      baton-list)
+    ("j" "Jump to session"    baton-jump)
+    ("w" "Jump to waiting"    baton-jump-to-waiting)]]
+  ["Diff Review"
+   :if (lambda () (featurep 'monet))
+   ("r" "Review pending diff" baton-review-diff
+    :inapt-if-not (lambda ()
+                    (cl-some (lambda (s)
+                               (plist-get (baton--session-metadata s) :pending-diff))
+                             (baton-session-list))))]
+  ["Configure"
+   ("-d" baton--default-agent-infix)])
 
 (provide 'baton)
 ;;; baton.el ends here

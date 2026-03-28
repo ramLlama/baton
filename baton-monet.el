@@ -20,7 +20,6 @@
 (require 'baton-session)
 
 ;; Silence byte-compiler warnings for forward/optional references.
-(defvar baton-global-map)
 (defvar baton-list-mode-map)
 (defvar baton--current-session)
 (declare-function baton-add-env-function "baton" (agent fn))
@@ -207,7 +206,6 @@ Safe to call even if monet is not loaded — does nothing in that case."
      :set :baton)
     (monet-enable-tool-set :baton)
     (baton-add-env-function 'claude-code #'monet-start-server-function)
-    (define-key baton-global-map (kbd "r") #'baton-review-diff)
     (define-key baton-list-mode-map (kbd "r") #'baton-list-review-diff)
     (add-hook 'baton-session-status-changed-hook #'baton-monet--update-review-bar)))
 
