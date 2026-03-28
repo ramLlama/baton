@@ -14,7 +14,7 @@
 (require 'cl-lib)
 (require 'birbal-session)
 
-(declare-function birbal-new "birbal" (agent-type-name directory &optional name))
+(declare-function birbal-new "birbal" (agent-name directory &optional name))
 
 ;;; Faces
 

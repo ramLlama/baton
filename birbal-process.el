@@ -20,7 +20,7 @@
 (defvar vterm-buffer-name-string)
 (defvar vterm--redraw-immediately)
 (defvar birbal-term-name)
-(defvar birbal-agent-types)
+(defvar birbal-agents)
 
 (declare-function vterm-mode          "vterm" ())
 (declare-function vterm-send-string   "vterm" (string &optional paste-p))
@@ -72,8 +72,8 @@ named \"*birbal:<name>*\" and the session's buffer slot is updated."
         ;; pop-to-buffer then switches focus to the buffer.
         (save-selected-window
           (pop-to-buffer buf)
-          (let* ((agent-def (gethash (birbal--session-agent-type session)
-                                     birbal-agent-types))
+          (let* ((agent-def (gethash (birbal--session-agent session)
+                                     birbal-agents))
                  (env-fns   (and agent-def (plist-get agent-def :env-functions)))
                  (extra-env (when env-fns
                               (apply #'append
@@ -235,9 +235,9 @@ waiting pattern matches, `idle' otherwise.  Tracks `:current-hash' and
          (hash-changed
           (birbal-session-set-status session 'running))
          ((>= (- now last-time) birbal-process--quiet-threshold)
-          (let* ((agent-type-sym (birbal--session-agent-type session))
-                 (agent-def (and (boundp 'birbal-agent-types)
-                                 (gethash agent-type-sym birbal-agent-types)))
+          (let* ((agent-sym (birbal--session-agent session))
+                 (agent-def (and (boundp 'birbal-agents)
+                                 (gethash agent-sym birbal-agents)))
                  (waiting-patterns (and agent-def (plist-get agent-def :waiting-patterns)))
                  (result (birbal-process--match-patterns text waiting-patterns))
                  ;; Preserve "diff review" while a pending diff awaits the user,

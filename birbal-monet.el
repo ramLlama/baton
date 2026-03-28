@@ -23,7 +23,7 @@
 (defvar birbal-global-map)
 (defvar birbal-list-mode-map)
 (defvar birbal--current-session)
-(declare-function birbal-add-env-function "birbal" (agent-type fn))
+(declare-function birbal-add-env-function "birbal" (agent fn))
 (declare-function birbal-list--current-session "birbal-notify" ())
 (declare-function monet-session-directory "monet" (session))
 (declare-function monet-make-open-diff-handler "monet" (diff-fn))
@@ -42,7 +42,7 @@
 Both DIRECTORY and stored session directories are normalized via
 `expand-file-name' and `file-name-as-directory' before comparison,
 so trailing slashes and relative components do not cause mismatches.
-Prefers agent-type `claude-code' when multiple sessions match.
+Prefers agent `claude-code' when multiple sessions match.
 Returns nil if no match is found."
   (let* ((dir (file-name-as-directory (expand-file-name directory)))
          (matches (cl-remove-if-not
@@ -52,7 +52,7 @@ Returns nil if no match is found."
                                   (expand-file-name (birbal--session-directory s)))
                                  dir)))
                    (birbal-session-list))))
-    (or (cl-find 'claude-code matches :key #'birbal--session-agent-type)
+    (or (cl-find 'claude-code matches :key #'birbal--session-agent)
         (car matches))))
 
 ;;; Diff Handler

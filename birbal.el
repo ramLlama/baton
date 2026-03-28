@@ -33,14 +33,14 @@
 
 (declare-function birbal-monet-setup "birbal-monet" ())
 
-;;; Agent-Type Registry
+;;; Agent Registry
 
-(defvar birbal-agent-types (make-hash-table :test 'eq)
-  "Hash table mapping agent-type symbols to their definition plists.
+(defvar birbal-agents (make-hash-table :test 'eq)
+  "Hash table mapping agent symbols to their definition plists.
 Each plist has keys: :command, :args, :waiting-patterns, :env-functions.")
 
-(cl-defun birbal-define-agent-type (&key name command (args nil) waiting-patterns (env-functions nil))
-  "Define or redefine an agent type.
+(cl-defun birbal-define-agent (&key name command (args nil) waiting-patterns (env-functions nil))
+  "Define or redefine an agent.
 NAME is a symbol (e.g. `claude-code').
 COMMAND is the shell command string.
 ARGS is a list of default arguments (default: nil).
@@ -52,23 +52,23 @@ ENV-FUNCTIONS is a list of functions (KEY DIRECTORY) -> list of
                  :args args
                  :waiting-patterns waiting-patterns
                  :env-functions env-functions)
-           birbal-agent-types))
+           birbal-agents))
 
-(defun birbal-add-env-function (agent-type fn)
-  "Add FN to the env-functions list for AGENT-TYPE if not already present.
+(defun birbal-add-env-function (agent fn)
+  "Add FN to the env-functions list for AGENT if not already present.
 Idempotent: calling with the same FN twice has the same effect as calling once.
 FN must accept (KEY DIRECTORY) and return a list of \"VAR=VALUE\" strings.
-AGENT-TYPE is a symbol key in `birbal-agent-types'."
-  (when-let* ((def (gethash agent-type birbal-agent-types)))
+AGENT is a symbol key in `birbal-agents'."
+  (when-let* ((def (gethash agent birbal-agents)))
     (unless (member fn (plist-get def :env-functions))
-      (puthash agent-type
+      (puthash agent
                (plist-put def :env-functions
                           (append (plist-get def :env-functions) (list fn)))
-               birbal-agent-types))))
+               birbal-agents))))
 
-;;; Built-in Agent Types
+;;; Built-in Agents
 
-(birbal-define-agent-type
+(birbal-define-agent
  :name 'claude-code
  :command "claude"
  :args '()
@@ -79,7 +79,7 @@ AGENT-TYPE is a symbol key in `birbal-agent-types'."
    ("Do you want to\\|Would you like to" . "confirmation")
    ("\\[Y/n\\]\\|\\[y/N\\]" . "confirmation")))
 
-(birbal-define-agent-type
+(birbal-define-agent
  :name 'aider
  :command "aider"
  :args '()
@@ -88,7 +88,7 @@ AGENT-TYPE is a symbol key in `birbal-agent-types'."
    ("Add these files" . "confirmation")
    ("\\[Y/n\\]" . "confirmation")))
 
-(birbal-define-agent-type
+(birbal-define-agent
  :name 'codex
  :command "codex"
  :args '()
@@ -155,23 +155,23 @@ uses colon-separated RGB codes that libvterm does not render."
 
 
 ;;;###autoload
-(defun birbal-new (agent-type-name directory &optional name)
+(defun birbal-new (agent-name directory &optional name)
   "Spawn a new agent session.
-AGENT-TYPE-NAME is a string naming the agent type (e.g. \"claude-code\").
+AGENT-NAME is a string naming the agent (e.g. \"claude-code\").
 DIRECTORY is the working directory for the session.
 NAME is an optional display name; prompted when called with \\[universal-argument]."
   (interactive
-   (list (completing-read "Agent type: "
-                          (mapcar #'symbol-name (hash-table-keys birbal-agent-types))
+   (list (completing-read "Agent: "
+                          (mapcar #'symbol-name (hash-table-keys birbal-agents))
                           nil t)
          (read-directory-name "Directory: " nil nil t)
          (when current-prefix-arg
            (let ((n (read-string "Session name (empty = auto): ")))
              (unless (string-empty-p n) n)))))
-  (let* ((agent-type (intern agent-type-name))
-         (def (gethash agent-type birbal-agent-types)))
+  (let* ((agent (intern agent-name))
+         (def (gethash agent birbal-agents)))
     (unless def
-      (error "Unknown agent type: %s" agent-type-name))
+      (error "Unknown agent: %s" agent-name))
     (let* ((args (plist-get def :args))
            (command (if args
                         (mapconcat #'identity
@@ -180,7 +180,7 @@ NAME is an optional display name; prompted when called with \\[universal-argumen
                                    " ")
                       (plist-get def :command)))
            (session (birbal-session-create
-                     :agent-type agent-type
+                     :agent agent
                      :command command
                      :directory (expand-file-name directory)
                      :name name)))

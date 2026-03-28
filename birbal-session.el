@@ -15,7 +15,7 @@
 (cl-defstruct birbal--session
   "An AI agent session managed by birbal."
   name            ; unique string, also used as registry key ("claude-1", or user-provided)
-  agent-type      ; symbol, key into birbal-agent-types
+  agent           ; symbol, key into birbal-agents
   command         ; string, the shell command that was run
   directory       ; string, working directory
   buffer          ; vterm buffer
@@ -23,7 +23,7 @@
   waiting-reason  ; string or nil ("permission prompt", "diff review")
   created-at      ; float-time timestamp
   updated-at      ; float-time timestamp
-  metadata)       ; plist for agent-type-specific data
+  metadata)       ; plist for agent-specific data
 
 ;;; Registries
 
@@ -31,7 +31,7 @@
   "Hash table mapping session ID strings to `birbal--session' structs.")
 
 (defvar birbal--session-counters (make-hash-table :test 'eq)
-  "Hash table mapping agent-type symbols to auto-increment counters.")
+  "Hash table mapping agent symbols to auto-increment counters.")
 
 ;;; Hooks
 
@@ -53,34 +53,34 @@ Each function is called with one argument: SESSION.")
 
 ;;; Internal Helpers
 
-(defun birbal--agent-type-short-name (agent-type)
-  "Return the display prefix for AGENT-TYPE symbol.
+(defun birbal--agent-short-name (agent)
+  "Return the display prefix for AGENT symbol.
 For `claude-code', returns \"claude\"; for `aider', returns \"aider\"."
-  (car (split-string (symbol-name agent-type) "-")))
+  (car (split-string (symbol-name agent) "-")))
 
-(defun birbal--next-session-name (agent-type)
-  "Return the next auto-generated display name for AGENT-TYPE.
-Increments the counter for AGENT-TYPE and returns \"<prefix>-<n>\"."
-  (let ((count (1+ (or (gethash agent-type birbal--session-counters) 0))))
-    (puthash agent-type count birbal--session-counters)
-    (format "%s-%d" (birbal--agent-type-short-name agent-type) count)))
+(defun birbal--next-session-name (agent)
+  "Return the next auto-generated display name for AGENT.
+Increments the counter for AGENT and returns \"<prefix>-<n>\"."
+  (let ((count (1+ (or (gethash agent birbal--session-counters) 0))))
+    (puthash agent count birbal--session-counters)
+    (format "%s-%d" (birbal--agent-short-name agent) count)))
 
 ;;; Public API
 
-(cl-defun birbal-session-create (&key agent-type command directory name)
+(cl-defun birbal-session-create (&key agent command directory name)
   "Create and register a new birbal session.
-AGENT-TYPE is a symbol key into `birbal-agent-types'.
+AGENT is a symbol key into `birbal-agents'.
 COMMAND is the shell command string.
 DIRECTORY is the working directory.
-NAME is optional; auto-generated from AGENT-TYPE if omitted.
+NAME is optional; auto-generated from AGENT if omitted.
 Returns the new `birbal--session'."
-  (let* ((session-name (or name (birbal--next-session-name agent-type)))
+  (let* ((session-name (or name (birbal--next-session-name agent)))
          (now (float-time)))
     (when (gethash session-name birbal--sessions)
       (error "A birbal session named %S already exists" session-name))
     (let* ((session (make-birbal--session
                      :name session-name
-                     :agent-type agent-type
+                     :agent agent
                      :command command
                      :directory directory
                      :buffer nil
