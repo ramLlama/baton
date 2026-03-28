@@ -121,7 +121,7 @@ Zero counts are omitted. The badge turns yellow when any session is waiting.
 
 ## Monet Integration
 
-Users of my [Monet](https://github.com/ramLlama/monet) package (forked from Steve Molitor's excellent [initial work](https://github.com/stevemolitor/monet)) get automatic diff-review awareness. When Claude Code requests a diff review, baton marks the session as waiting with reason "diff review" and resets it when you accept or quit. No configuration needed — `baton-mode` sets this up automatically when monet is loaded.
+Users of my [Monet](https://github.com/ramLlama/monet) package (forked from Steve Molitor's [excellent work](https://github.com/stevemolitor/monet)) get automatic diff-review awareness. When Claude Code requests a diff review, baton marks the session as waiting with reason "diff review" and resets it when you accept or quit. No configuration needed — `baton-mode` sets this up automatically when monet is loaded.
 
 ## License
 
