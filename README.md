@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="Baton" width="400">
+  <img src="logo.png" alt="Baton" width="600">
 </p>
 
 # Baton
