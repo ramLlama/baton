@@ -29,6 +29,7 @@
 (require 'baton-session)
 (require 'baton-process)
 (require 'baton-notify)
+(require 'baton-alert)
 
 (declare-function baton-monet-setup "baton-monet" ())
 (declare-function baton-review-diff "baton-monet" (session-name))
@@ -132,14 +133,16 @@ this setting."
   (add-hook 'baton-session-status-changed-hook  #'baton-notify--on-status-changed)
   (add-hook 'baton-session-created-hook         #'baton-notify--on-session-event)
   (add-hook 'baton-session-killed-hook          #'baton-notify--on-session-event)
-  (add-hook 'baton-session-unread-changed-hook  #'baton-notify--on-unread-changed))
+  (add-hook 'baton-session-unread-changed-hook  #'baton-notify--on-unread-changed)
+  (baton-alert--setup))
 
 (defun baton--teardown-hooks ()
   "Remove baton notification hooks."
   (remove-hook 'baton-session-status-changed-hook  #'baton-notify--on-status-changed)
   (remove-hook 'baton-session-created-hook         #'baton-notify--on-session-event)
   (remove-hook 'baton-session-killed-hook          #'baton-notify--on-session-event)
-  (remove-hook 'baton-session-unread-changed-hook  #'baton-notify--on-unread-changed))
+  (remove-hook 'baton-session-unread-changed-hook  #'baton-notify--on-unread-changed)
+  (setq baton-notify-function #'baton-notify--default))
 
 ;;; User Commands
 

@@ -19,7 +19,7 @@ LOAD_PATHS := -L . \
               $(if $(VTERM_DIR),-L $(VTERM_DIR))
 
 EL_FILES := baton-session.el baton-process.el baton-notify.el \
-            baton-monet.el baton.el
+            baton-alert.el baton-monet.el baton.el
 
 MATCH ?=
 
@@ -53,6 +53,7 @@ test:
 	  -l baton-session.el \
 	  -l baton-process.el \
 	  -l baton-notify.el \
+	  -l baton-alert.el \
 	  -l baton.el \
 	  -l baton-tests.el \
 	  $(if $(MATCH),--eval "(ert-run-tests-batch-and-exit \"$(MATCH)\")",-f ert-run-tests-batch-and-exit)

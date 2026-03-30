@@ -20,9 +20,10 @@ baton/
   baton-session.el    -- Session struct (cl-defstruct), hash-table registries, lifecycle hooks
   baton-process.el    -- vterm spawning, 500ms debounced output watcher, pure pattern matcher
   baton-notify.el     -- Modeline segment B[Nw/Ni/Nr N*], *Baton* tabulated-list buffer, baton-jump
+  baton-alert.el      -- Desktop alert backend registry: alerter, OSC 777, D-Bus/toast, echo fallback
   baton-monet.el      -- Optional monet integration: overrides openDiff tool for diff-review awareness
   baton.el            -- Agent-type registry, baton-mode global minor mode, user commands, keymaps
-  baton-tests.el      -- ERT test suite (41 tests; 1 skipped without monet)
+  baton-tests.el      -- ERT test suite (57 tests; 1 skipped without monet)
   Makefile             -- checkdoc / compile / test targets
   .gitignore           -- *.elc
   .claude/
@@ -36,8 +37,9 @@ Strict require chain -- each file requires only what it needs:
 1. `baton-session` -- no baton dependencies (requires only `cl-lib`)
 2. `baton-process` -- requires `baton-session`
 3. `baton-notify` -- requires `baton-session`
-4. `baton-monet` -- requires `baton-session` (monet symbols are `declare-function` only)
-5. `baton` -- requires `baton-session`, `baton-process`, `baton-notify`; conditionally loads `baton-monet`
+4. `baton-alert` -- requires `baton-session`, `baton-notify`
+5. `baton-monet` -- requires `baton-session` (monet symbols are `declare-function` only)
+6. `baton` -- requires `baton-session`, `baton-process`, `baton-notify`, `baton-alert`; conditionally loads `baton-monet`
 
 ## Key Concepts & Domain Model
 
@@ -84,6 +86,23 @@ Session metadata tracks two hashes:
 
 `baton-session-unread-p` returns `t` when the buffer is not currently visible and `:current-hash ≠ :last-seen-hash`. This is purely computed — no stored boolean flag.
 
+### Alert Backend Registry (`baton-alert--backends`)
+
+An ordered alist where each entry is `(NAME :predicate PRED :handler HANDLER)`. `baton-alert--dispatch` iterates front-to-back; the first backend whose `:predicate` returns non-nil fires. User-registered backends prepend (higher priority); built-ins append.
+
+Built-in backends in priority order:
+1. **`alerter`** -- macOS `alerter` CLI; disabled over SSH
+2. **`osc777`** -- OSC 777 terminal escape; active only in SSH sessions
+3. **`notifications`** -- Emacs built-in D-Bus/Windows notifications; non-macOS, non-SSH
+4. **`echo`** -- echo-area `message`; always available fallback
+
+Key private symbols (double-dash, architected for future promotion to public):
+- `baton-alert--register-backend` / `baton-alert--deregister-backend` -- manage user backends
+- `baton-alert--dispatch` -- installed as `baton-notify-function` by `baton-alert--setup`
+- `baton-alert--format` -- builds `(:title :body :icon)` plist from a session
+- `baton-alert--sanitize-terminal` -- strips control characters for safe OSC 777 injection
+- `baton-alert--icon-path` -- resolved from `logo.png` adjacent to the .el file at load time
+
 ### Hooks
 
 - `baton-session-created-hook` -- args: `(session)`
@@ -113,7 +132,7 @@ The pattern matcher (`baton-process--match-patterns`) is **pure** -- takes `(tex
 
 - **Modeline**: `baton-notify--modeline-string` returns `" B[Nw/Ni/Nr N*]"` — zero counts omitted, `N*` only when unread > 0, yellow when waiting > 0, clickable
 - **Status buffer**: `*Baton*` -- `tabulated-list-mode` derivative with ibuffer-style mark/kill/jump; idle sessions show `○` indicator, `○*` when unread
-- **Notification function**: `baton-notify-function` (default: echo-area message) — called on `waiting` transitions and on unread transitions
+- **Desktop alerts**: `baton-alert--dispatch` (installed by `baton-alert--setup`) replaces `baton-notify-function` — called on `waiting` transitions and on unread transitions. Tries backends in priority order; handler errors are caught by `condition-case-unless-debug` to avoid breaking the watcher timer.
 
 ### Monet Integration (Optional)
 
@@ -175,7 +194,7 @@ M-x ert RET baton-test-session-create-returns-struct RET
 
 8. **`baton-monet.el` wraps monet callbacks** by passing a custom diff function to `monet-make-open-diff-handler` that intercepts accept/quit to reset baton session status.
 
-9. **`baton-mode` is a global minor mode**. Enabling it wires hooks, enables `baton-modeline-mode`, and sets up the monet bridge. Disabling it tears down hooks and the modeline.
+9. **`baton-mode` is a global minor mode**. Enabling it wires hooks, enables `baton-modeline-mode`, installs `baton-alert--dispatch` as the notify function, and sets up the monet bridge. Disabling it tears down hooks, reverts `baton-notify-function`, and the modeline.
 
 10. **No `:lighter` on `baton-mode`**. The modeline indicator comes from `baton-modeline-mode` which adds to `global-mode-string`, not from the mode lighter.
 
@@ -186,6 +205,14 @@ M-x ert RET baton-test-session-create-returns-struct RET
 13. **Duplicate session names are rejected**. `baton-session-create` signals an error if a session with the given name already exists. There is no separate `id` field -- `name` is the unique identifier and registry key.
 
 14. **Monet `ideName` format** in lockfiles is `"Emacs (<session-key> @ <port>)"`, not just `"Emacs (<session-key>)"`. The port disambiguates multiple Emacs instances.
+
+15. **The `notifications` package is lazy-loaded** (`require 'notifications nil t`) inside the backend predicate to avoid load errors on macOS where D-Bus is unavailable. `declare-function notifications-notify` silences the byte-compiler.
+
+16. **OSC 777 terminal injection prevention**. `baton-alert--sanitize-terminal` strips all control characters from title/body before embedding in the escape sequence. This guards against session names or waiting-reasons containing escape codes.
+
+17. **Alert handler errors are caught** by `condition-case-unless-debug` in `baton-alert--dispatch`. A failing backend logs once to `*Messages*` but does not propagate into the watcher timer.
+
+18. **All `baton-alert--` symbols are private** by double-dash convention. The API is architected for future promotion to public (single-dash) naming but is not yet stable.
 
 ## Style Conventions
 
