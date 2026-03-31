@@ -106,12 +106,40 @@ omitted when no unread sessions.  The whole string is highlighted in
   "Refresh the modeline."
   (force-mode-line-update t))
 
-(defun baton-notify--on-status-changed (session old-status new-status)
+(defconst baton-notify--idle-delay 5
+  "Seconds a session must remain idle before an unread notification fires.")
+
+(defun baton-notify--cancel-idle-timer (session)
+  "Cancel any pending idle notification timer for SESSION."
+  (let ((meta (baton--session-metadata session)))
+    (when-let* ((timer (plist-get meta :idle-notify-timer)))
+      (cancel-timer timer)
+      (setf (baton--session-metadata session)
+            (plist-put meta :idle-notify-timer nil)))))
+
+(defun baton-notify--pending-notify-callback (session)
+  "Fire a notification for SESSION if still applicable after the idle delay.
+Notifies when status is `waiting', or `idle' with unread output.
+No-op if the session has returned to `running'."
+  (setf (baton--session-metadata session)
+        (plist-put (baton--session-metadata session) :idle-notify-timer nil))
+  (let ((status (baton--session-status session)))
+    (when (or (eq status 'waiting)
+              (and (eq status 'idle) (baton-session-unread-p session)))
+      (funcall baton-notify-function session))))
+
+(defun baton-notify--on-status-changed (session _old-status new-status)
   "Handle SESSION status change from OLD-STATUS to NEW-STATUS."
   (force-mode-line-update t)
-  (when (and (eq new-status 'waiting)
-             (not (eq old-status 'waiting)))
-    (funcall baton-notify-function session))
+  (if (memq new-status '(waiting idle))
+      (progn
+        (baton-notify--cancel-idle-timer session)
+        (setf (baton--session-metadata session)
+              (plist-put (baton--session-metadata session) :idle-notify-timer
+                         (run-at-time baton-notify--idle-delay nil
+                                      #'baton-notify--pending-notify-callback
+                                      session))))
+    (baton-notify--cancel-idle-timer session))
   (baton-notify--refresh-list-buffer))
 
 (defun baton-notify--on-session-event (&rest _)
@@ -119,10 +147,9 @@ omitted when no unread sessions.  The whole string is highlighted in
   (force-mode-line-update t)
   (baton-notify--refresh-list-buffer))
 
-(defun baton-notify--on-unread-changed (session)
+(defun baton-notify--on-unread-changed (_session)
   "Handle SESSION becoming unread."
   (force-mode-line-update t)
-  (funcall baton-notify-function session)
   (baton-notify--refresh-list-buffer))
 
 ;;; Status Buffer (`*Baton*')

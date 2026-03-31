@@ -130,7 +130,8 @@ Called automatically by `baton-mode'.  Safe to call multiple times."
                    (executable-find "alerter")))
  :handler (lambda (title body)
             (let ((args (list "--title" title "--message" body
-                              "--sender" "org.gnu.Emacs")))
+                              "--sender" "org.gnu.Emacs"
+                              "--timeout" "5")))
               (when baton-alert--icon-path
                 (setq args (append args (list "--app-icon" baton-alert--icon-path))))
               (apply #'start-process "baton-alerter" nil "alerter" args))))
