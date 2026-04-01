@@ -45,11 +45,13 @@
 
 ;;; Notification Function
 
-(defvar baton-notify-function #'baton-notify--default
+(defcustom baton-notify-function #'baton-notify--default
   "Function called when a session needs attention.
 Called with one argument: the `baton--session'.  Invoked when a session
 transitions to `waiting' status, and when output arrives in a session
-buffer the user is not currently viewing (unread).")
+buffer the user is not currently viewing (unread)."
+  :type 'function
+  :group 'baton)
 
 (defun baton-notify--default (session)
   "Default notification: display a message in the echo area for SESSION."
@@ -59,17 +61,25 @@ buffer the user is not currently viewing (unread).")
 
 ;;; Modeline Markers
 
-(defvar baton-marker-waiting "w"
-  "Modeline marker for waiting sessions.  Can be set to an emoji, e.g. \"⏳\".")
+(defcustom baton-marker-waiting "w"
+  "Modeline marker for waiting sessions.  Can be set to an emoji, e.g. \"⏳\"."
+  :type 'string
+  :group 'baton)
 
-(defvar baton-marker-idle "i"
-  "Modeline marker for idle sessions.  Can be set to an emoji, e.g. \"💤\".")
+(defcustom baton-marker-idle "i"
+  "Modeline marker for idle sessions.  Can be set to an emoji, e.g. \"💤\"."
+  :type 'string
+  :group 'baton)
 
-(defvar baton-marker-running "r"
-  "Modeline marker for running sessions.  Can be set to an emoji, e.g. \"🏃\".")
+(defcustom baton-marker-running "r"
+  "Modeline marker for running sessions.  Can be set to an emoji, e.g. \"🏃\"."
+  :type 'string
+  :group 'baton)
 
-(defvar baton-marker-unread "*"
-  "Modeline marker for unread sessions.  Can be set to an emoji, e.g. \"📬\".")
+(defcustom baton-marker-unread "*"
+  "Modeline marker for unread sessions.  Can be set to an emoji, e.g. \"📬\"."
+  :type 'string
+  :group 'baton)
 
 ;;; Modeline
 

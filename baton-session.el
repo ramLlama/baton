@@ -35,21 +35,29 @@
 
 ;;; Hooks
 
-(defvar baton-session-created-hook nil
+(defcustom baton-session-created-hook nil
   "Hook called when a session is created.
-Each function is called with one argument: the new `baton--session'.")
+Each function is called with one argument: the new `baton--session'."
+  :type 'hook
+  :group 'baton)
 
-(defvar baton-session-killed-hook nil
+(defcustom baton-session-killed-hook nil
   "Hook called when a session is killed.
-Each function is called with one argument: the killed `baton--session'.")
+Each function is called with one argument: the killed `baton--session'."
+  :type 'hook
+  :group 'baton)
 
-(defvar baton-session-status-changed-hook nil
+(defcustom baton-session-status-changed-hook nil
   "Hook called when a session's status changes.
-Each function is called with three arguments: SESSION, OLD-STATUS, NEW-STATUS.")
+Each function is called with three arguments: SESSION, OLD-STATUS, NEW-STATUS."
+  :type 'hook
+  :group 'baton)
 
-(defvar baton-session-unread-changed-hook nil
+(defcustom baton-session-unread-changed-hook nil
   "Hook called when a session transitions from read to unread.
-Each function is called with one argument: SESSION.")
+Each function is called with one argument: SESSION."
+  :type 'hook
+  :group 'baton)
 
 ;;; Internal Helpers
 
