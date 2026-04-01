@@ -38,6 +38,11 @@
   "Face for the unread output indicator."
   :group 'baton)
 
+(defface baton-face-modeline-alert
+  '((t :background "yellow" :foreground "black" :inherit mode-line))
+  "Face for the modeline segment when one or more sessions are waiting."
+  :group 'baton)
+
 ;;; Notification Function
 
 (defvar baton-notify-function #'baton-notify--default
@@ -52,13 +57,29 @@ buffer the user is not currently viewing (unread).")
            (baton--session-name session)
            (or (baton--session-waiting-reason session) "unread output")))
 
+;;; Modeline Markers
+
+(defvar baton-marker-waiting "w"
+  "Modeline marker for waiting sessions.  Can be set to an emoji, e.g. \"⏳\".")
+
+(defvar baton-marker-idle "i"
+  "Modeline marker for idle sessions.  Can be set to an emoji, e.g. \"💤\".")
+
+(defvar baton-marker-running "r"
+  "Modeline marker for running sessions.  Can be set to an emoji, e.g. \"🏃\".")
+
+(defvar baton-marker-unread "*"
+  "Modeline marker for unread sessions.  Can be set to an emoji, e.g. \"📬\".")
+
 ;;; Modeline
 
 (defun baton-notify--modeline-string ()
   "Return a propertized modeline string showing agent counts.
 Format: \" B[Nw/Ni/Nr N*]\" — segments omitted when zero; `*' count
-omitted when no unread sessions.  The whole string is highlighted in
-`baton-face-waiting' when any session is waiting."
+omitted when no unread sessions.  The whole string is highlighted with
+`baton-face-modeline-alert' (yellow background) when any session is
+waiting.  Markers are controlled by `baton-marker-waiting',
+`baton-marker-idle', `baton-marker-running', and `baton-marker-unread'."
   (let ((waiting 0) (idle 0) (running 0) (unread 0))
     (dolist (s (baton-session-list))
       (pcase (baton--session-status s)
@@ -70,13 +91,13 @@ omitted when no unread sessions.  The whole string is highlighted in
         (cl-incf unread)))
     (if (zerop (+ waiting idle running))
         ""
-      (let* ((parts (delq nil (list (when (> waiting 0) (format "%dw" waiting))
-                                    (when (> idle    0) (format "%di" idle))
-                                    (when (> running  0) (format "%dr" running)))))
+      (let* ((parts (delq nil (list (when (> waiting 0) (format "%d%s" waiting baton-marker-waiting))
+                                    (when (> idle    0) (format "%d%s" idle    baton-marker-idle))
+                                    (when (> running  0) (format "%d%s" running baton-marker-running)))))
              (counts (mapconcat #'identity parts "/"))
-             (unread-str (if (> unread 0) (format " %d*" unread) ""))
+             (unread-str (if (> unread 0) (format " %d%s" unread baton-marker-unread) ""))
              (str (format " B[%s%s]" counts unread-str))
-             (face (if (zerop waiting) 'mode-line 'baton-face-waiting))
+             (face (if (zerop waiting) 'mode-line 'baton-face-modeline-alert))
              (map (make-sparse-keymap)))
         (define-key map [mode-line mouse-1] #'baton-list)
         (propertize str
