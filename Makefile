@@ -30,8 +30,15 @@ default: all
 clean:
 	rm -f *.elc baton-autoloads.el
 
+TEST_FILES := test/baton-test-helpers.el \
+             test/baton-session-tests.el \
+             test/baton-process-tests.el \
+             test/baton-notify-tests.el \
+             test/baton-monet-tests.el \
+             test/baton-alert-tests.el
+
 checkdoc:
-	for FILE in $(EL_FILES) baton-tests.el; do \
+	for FILE in $(EL_FILES) $(TEST_FILES); do \
 	  $(EMACS) --batch $(LOAD_PATHS) \
 	    --eval "(package-initialize)" \
 	    --eval "(setq sentence-end-double-space nil)" \
@@ -55,7 +62,7 @@ test:
 	  -l baton-notify.el \
 	  -l baton-alert.el \
 	  -l baton.el \
-	  -l baton-tests.el \
+	  $(foreach f,$(TEST_FILES),-l $(f)) \
 	  $(if $(MATCH),--eval "(ert-run-tests-batch-and-exit \"$(MATCH)\")",-f ert-run-tests-batch-and-exit)
 
 all: checkdoc compile
