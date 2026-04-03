@@ -38,20 +38,24 @@
 
 (defvar baton-agents (make-hash-table :test 'eq)
   "Hash table mapping agent symbols to their definition plists.
-Each plist has keys: :command, :args, :waiting-patterns, :env-functions.")
+Each plist has keys: :command, :args, :status-function, :env-functions.")
 
-(cl-defun baton-define-agent (&key name command (args nil) waiting-patterns (env-functions nil))
+(cl-defun baton-define-agent (&key name command (args nil)
+                               (status-function nil) (env-functions nil))
   "Define or redefine an agent.
 NAME is a symbol (e.g. `claude-code').
 COMMAND is the shell command string.
 ARGS is a list of default arguments (default: nil).
-WAITING-PATTERNS is an alist of (REGEXP . REASON).
+STATUS-FUNCTION is an optional function (TEXT) -> (cons KEYWORD VALUE) or nil.
+KEYWORD may be :waiting, :error, :other, :running, or :idle; nil means idle.
+Use `baton-process-make-regex-status-function' to build one from a pattern
+alist.
 ENV-FUNCTIONS is a list of functions (KEY DIRECTORY) -> list of
 \"VAR=VALUE\" strings (default: nil)."
   (puthash name
            (list :command command
                  :args args
-                 :waiting-patterns waiting-patterns
+                 :status-function status-function
                  :env-functions env-functions)
            baton-agents))
 
@@ -73,29 +77,29 @@ AGENT is a symbol key in `baton-agents'."
  :name 'claude-code
  :command "claude"
  :args '()
- :waiting-patterns
  ;; Patterns are matched against the last 250 lines — keep them specific.
- '(("╭─" . "input prompt")
-   ("Allow.*tool\\|Allow.*command\\|Bash.*Allow" . "permission prompt")
-   ("Do you want to\\|Would you like to" . "confirmation")
-   ("\\[Y/n\\]\\|\\[y/N\\]" . "confirmation")))
+ :status-function (baton-process-make-regex-status-function
+                   '(("╭─" . (:waiting . "input prompt"))
+                     ("Allow.*tool\\|Allow.*command\\|Bash.*Allow" . (:waiting . "permission prompt"))
+                     ("Do you want to\\|Would you like to" . (:waiting . "confirmation"))
+                     ("\\[Y/n\\]\\|\\[y/N\\]" . (:waiting . "confirmation")))))
 
 (baton-define-agent
  :name 'aider
  :command "aider"
  :args '()
- :waiting-patterns
- '(("^> " . "input prompt")
-   ("Add these files" . "confirmation")
-   ("\\[Y/n\\]" . "confirmation")))
+ :status-function (baton-process-make-regex-status-function
+                   '(("^> " . (:waiting . "input prompt"))
+                     ("Add these files" . (:waiting . "confirmation"))
+                     ("\\[Y/n\\]" . (:waiting . "confirmation")))))
 
 (baton-define-agent
  :name 'codex
  :command "codex"
  :args '()
- :waiting-patterns
- '(("^> " . "input prompt")
-   ("\\[y/N\\]" . "confirmation")))
+ :status-function (baton-process-make-regex-status-function
+                   '(("^> " . (:waiting . "input prompt"))
+                     ("\\[y/N\\]" . (:waiting . "confirmation")))))
 
 ;;; Customization Group
 

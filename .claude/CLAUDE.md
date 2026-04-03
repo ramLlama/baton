@@ -23,8 +23,14 @@ baton/
   baton-alert.el      -- Desktop alert backend registry: alerter, OSC 777, D-Bus/toast, echo fallback
   baton-monet.el      -- Optional monet integration: overrides openDiff tool for diff-review awareness
   baton.el            -- Agent-type registry, baton-mode global minor mode, user commands, keymaps
-  baton-tests.el      -- ERT test suite (57 tests; 1 skipped without monet)
-  Makefile             -- checkdoc / compile / test targets
+  test/
+    baton-test-helpers.el   -- Shared ERT macros (baton-test-with-clean-state, baton-alert-test-with-clean-state)
+    baton-session-tests.el  -- Session lifecycle and unread tests
+    baton-process-tests.el  -- Agent registry, status-function dispatch, env-functions
+    baton-notify-tests.el   -- Modeline, timers, status buffer, error/other notify
+    baton-monet-tests.el    -- Monet diff workflow
+    baton-alert-tests.el    -- Alert backends
+  Makefile             -- checkdoc / compile / test targets; TEST_FILES variable
   .gitignore           -- *.elc
   .claude/
     settings.local.json -- Allowed bash commands for Claude Code
@@ -49,8 +55,8 @@ The central data structure. A `cl-defstruct` with fields:
 - `name` -- unique string, also the registry key (auto-generated as `"<agent-prefix>-<n>"` or user-provided). Duplicates are rejected at creation time with an error.
 - `agent-type` -- symbol key into `baton-agent-types` (e.g., `'claude-code`, `'aider`)
 - `command`, `directory`, `buffer` -- the shell command, working dir, and vterm buffer
-- `status` -- one of: `running`, `waiting`, `idle`
-- `waiting-reason` -- string describing why the agent is waiting (e.g., "permission prompt")
+- `status` -- symbol: `running`, `waiting`, `idle`, `error`, or `other`
+- `waiting-reason` -- string describing why the agent is waiting, in error, or in other status (e.g., "permission prompt")
 - `created-at`, `updated-at` -- `float-time` timestamps
 - `metadata` -- plist for internal state (`:watcher-timer`, `:last-output-hash`, `:last-output-time`, `:current-hash`, `:last-seen-hash`)
 
@@ -59,9 +65,9 @@ The central data structure. A `cl-defstruct` with fields:
 A hash-table (`eq` test) mapping agent-type symbols to definition plists. Each plist has:
 - `:command` -- shell command string
 - `:args` -- default argument list
-- `:waiting-patterns` -- alist of `(REGEXP . REASON)` for detecting "needs attention"
+- `:status-function` -- optional function `(TEXT) -> (cons KEYWORD VALUE) | nil`. KEYWORD may be `:waiting`, `:error`, `:other`, `:running`, or `:idle` (nil also means idle). Use `baton-process-make-regex-status-function` to build pattern-based status functions; its alist format is `(REGEXP . (KEYWORD . REASON))`.
 
-Register new types with `baton-define-agent-type`. Three built-in: `claude-code`, `aider`, `codex`.
+Register new types with `baton-define-agent`. Three built-in: `claude-code`, `aider`, `codex`.
 
 ### Session Registries
 
@@ -72,9 +78,11 @@ Register new types with `baton-define-agent-type`. Three built-in: `claude-code`
 
 State is **derived fresh each watcher tick** — not accumulated via a state machine:
 
-- `running` -- output hash changed since last tick
-- `waiting` -- output has been stable ≥ 0.5s AND a waiting pattern matches
-- `idle` -- output has been stable ≥ 0.5s AND no waiting pattern matches
+- `running` -- output hash changed since last tick (or `:status-function` returns `:running`)
+- `waiting` -- output has been stable ≥ 0.5s AND `:status-function` returns `:waiting`
+- `error` -- output has been stable ≥ 0.5s AND `:status-function` returns `:error`
+- `other` -- output has been stable ≥ 0.5s AND `:status-function` returns `:other`
+- `idle` -- output has been stable ≥ 0.5s AND `:status-function` returns nil or `:idle`
 
 When a session's process exits, the vterm buffer is killed and the watcher self-cancels. There is no `done` state.
 
@@ -120,19 +128,19 @@ The watcher is a repeating timer (0.5s interval) per session. On each tick:
 1. Read last 250 lines of the vterm buffer; MD5-hash the text
 2. Update `:current-hash` in metadata
 3. If hash changed: update `:last-output-time`; derive status `running`
-4. If hash stable ≥ 0.5s: run `baton-process--match-patterns`; derive `waiting` or `idle`
+4. If hash stable ≥ 0.5s: call `:status-function` with text; dispatch on keyword: `:waiting` → waiting, `:running` → running, `:error` → error, `:other` → other, nil/unknown → idle
 5. `set-status` is guarded — only fires the hook when state or reason actually changes
 6. If buffer is visible in any window: update `:last-seen-hash` (marks session read)
 7. Fire `baton-session-unread-changed-hook` if session transitioned read→unread this tick
 8. Call `force-mode-line-update t` to keep unread counts current
 
-The pattern matcher (`baton-process--match-patterns`) is **pure** -- takes `(text waiting-patterns)`, returns `(cons :waiting REASON)` or `nil`. No vterm dependency, fully unit-testable.
+The `:status-function` is **pure** -- takes `(TEXT)`, returns `(cons KEYWORD REASON)` or `nil`. No vterm dependency, fully unit-testable. `baton-process-make-regex-status-function` builds one from a pattern alist.
 
 ### Notification Surface
 
-- **Modeline**: `baton-notify--modeline-string` returns `" B[Nw/Ni/Nr N*]"` — zero counts omitted, `N*` only when unread > 0, yellow when waiting > 0, clickable
+- **Modeline**: `baton-notify--modeline-string` returns `" B[Nw/Ni/Nr/Ne/No N*]"` — zero counts omitted, `N*` only when unread > 0, alert face (yellow) when waiting > 0 or error > 0, clickable
 - **Status buffer**: `*Baton*` -- `tabulated-list-mode` derivative with ibuffer-style mark/kill/jump; idle sessions show `○` indicator, `○*` when unread
-- **Desktop alerts**: `baton-alert--dispatch` (installed by `baton-alert--setup`) replaces `baton-notify-function` — called on `waiting` transitions and on unread transitions. Tries backends in priority order; handler errors are caught by `condition-case-unless-debug` to avoid breaking the watcher timer.
+- **Desktop alerts**: `baton-alert--dispatch` (installed by `baton-alert--setup`) replaces `baton-notify-function` — called on `waiting` transitions, and on unread transitions for all statuses (including `error` and `other`). Tries backends in priority order; handler errors are caught by `condition-case-unless-debug` to avoid breaking the watcher timer.
 
 ### Monet Integration (Optional)
 
@@ -153,7 +161,7 @@ Ensure `vterm` is installed in your Emacs. Optionally clone monet to `../monet`.
 ### Run tests
 
 ```bash
-make test                        # all tests (40 pass, 1 skipped without monet)
+make test                        # all tests in test/ directory (1 skipped without monet)
 make test MATCH=monet            # run only tests matching "monet"
 make test MONET_DIR=../monet     # include monet for full coverage
 ```
@@ -184,11 +192,11 @@ M-x ert RET baton-test-session-create-returns-struct RET
 
 3. **State is derived, not accumulated**. Every watcher tick re-derives the status from current observations. `set-status` is guarded to only fire the hook when status/reason actually changes — so `idle` sessions don't spam the hook every 0.5s.
 
-4. **`baton-process--on-input` resets the quiet-period clock**. When the user types in a `waiting` or `idle` session, `:last-output-time` is reset to now, preventing the watcher from immediately re-deriving the prior state before the agent has had a chance to respond.
+4. **`baton-process--on-input` resets the quiet-period clock**. When the user types in any non-running session, `:last-output-time` is reset to now and the session is set to `running`, preventing the watcher from immediately re-deriving the prior state before the agent has had a chance to respond.
 
 5. **Unread is purely computed** via `baton-session-unread-p` — no stored flag. It compares `:current-hash` (updated each tick) to `:last-seen-hash` (updated while buffer is visible). The `baton-session-unread-changed-hook` is fired only on the first tick where a session transitions from read to unread.
 
-6. **The test isolation macro `baton-test-with-clean-state`** rebinds all global state (sessions, counters, agent-types, hooks including `baton-session-unread-changed-hook`) with `let`. Always use it in tests to avoid cross-contamination.
+6. **The test isolation macro `baton-test-with-clean-state`** lives in `test/baton-test-helpers.el`. It rebinds all global state (sessions, counters, agent-types, hooks including `baton-session-unread-changed-hook`) with `let`. Always use it in tests to avoid cross-contamination.
 
 7. **The monet test requires monet** (`skip-unless (featurep 'monet)`). Set `MONET_DIR=../monet` in make invocations for full test coverage.
 

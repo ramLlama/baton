@@ -19,8 +19,8 @@
   command         ; string, the shell command that was run
   directory       ; string, working directory
   buffer          ; vterm buffer
-  status          ; symbol: running | waiting | idle
-  waiting-reason  ; string or nil ("permission prompt", "diff review")
+  status          ; symbol: running | waiting | idle | error | other
+  waiting-reason  ; string or nil; holds reason for waiting, error, and other statuses
   created-at      ; float-time timestamp
   updated-at      ; float-time timestamp
   metadata)       ; plist for agent-specific data
@@ -114,13 +114,14 @@ If STATUS is non-nil, return only sessions with that status symbol."
       all)))
 
 (defun baton-session-set-status (session new-status &optional reason)
-  "Set SESSION status to NEW-STATUS with optional waiting REASON.
+  "Set SESSION status to NEW-STATUS with optional REASON string.
 Fires `baton-session-status-changed-hook' with (SESSION OLD-STATUS NEW-STATUS)
 only when the status or waiting-reason actually changes.
-When NEW-STATUS is not `waiting', clears the waiting-reason."
+REASON is preserved for `waiting', `error', and `other' statuses; cleared
+for all others."
   (let ((old-status (baton--session-status session))
         (old-reason (baton--session-waiting-reason session))
-        (new-reason (when (eq new-status 'waiting) reason)))
+        (new-reason (when (memq new-status '(waiting error other)) reason)))
     (unless (and (eq old-status new-status) (equal old-reason new-reason))
       (setf (baton--session-status session) new-status)
       (setf (baton--session-waiting-reason session) new-reason)

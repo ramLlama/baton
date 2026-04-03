@@ -33,6 +33,16 @@
   "Face for sessions in `running' status."
   :group 'baton)
 
+(defface baton-face-error
+  '((t :inherit error))
+  "Face for sessions in `error' status."
+  :group 'baton)
+
+(defface baton-face-other
+  '((t :inherit shadow))
+  "Face for sessions in `other' status."
+  :group 'baton)
+
 (defface baton-face-unread
   '((t :inherit font-lock-warning-face))
   "Face for the unread output indicator."
@@ -76,6 +86,16 @@ buffer the user is not currently viewing (unread)."
   :type 'string
   :group 'baton)
 
+(defcustom baton-marker-error "e"
+  "Modeline marker for error sessions.  Can be set to an emoji, e.g. \"💥\"."
+  :type 'string
+  :group 'baton)
+
+(defcustom baton-marker-other "o"
+  "Modeline marker for sessions in `other' status."
+  :type 'string
+  :group 'baton)
+
 (defcustom baton-marker-unread "*"
   "Modeline marker for unread sessions.  Can be set to an emoji, e.g. \"📬\"."
   :type 'string
@@ -85,29 +105,35 @@ buffer the user is not currently viewing (unread)."
 
 (defun baton-notify--modeline-string ()
   "Return a propertized modeline string showing agent counts.
-Format: \" B[Nw/Ni/Nr N*]\" — segments omitted when zero; `*' count
+Format: \" B[Nw/Ne/No/Ni/Nr N*]\" — segments omitted when zero; `*' count
 omitted when no unread sessions.  The whole string is highlighted with
 `baton-face-modeline-alert' (yellow background) when any session is
-waiting.  Markers are controlled by `baton-marker-waiting',
-`baton-marker-idle', `baton-marker-running', and `baton-marker-unread'."
-  (let ((waiting 0) (idle 0) (running 0) (unread 0))
+waiting or in error.  Markers are controlled by `baton-marker-waiting',
+`baton-marker-error', `baton-marker-other', `baton-marker-idle',
+`baton-marker-running', and `baton-marker-unread'."
+  (let ((waiting 0) (error-count 0) (other 0) (idle 0) (running 0) (unread 0))
     (dolist (s (baton-session-list))
       (pcase (baton--session-status s)
         ('waiting (cl-incf waiting))
+        ('error   (cl-incf error-count))
+        ('other   (cl-incf other))
         ('idle    (cl-incf idle))
         ('running (cl-incf running)))
       (when (and (not (eq (baton--session-status s) 'running))
                  (baton-session-unread-p s))
         (cl-incf unread)))
-    (if (zerop (+ waiting idle running))
+    (if (zerop (+ waiting error-count other idle running))
         ""
-      (let* ((parts (delq nil (list (when (> waiting 0) (format "%d%s" waiting baton-marker-waiting))
-                                    (when (> idle    0) (format "%d%s" idle    baton-marker-idle))
-                                    (when (> running  0) (format "%d%s" running baton-marker-running)))))
+      (let* ((parts (delq nil
+                          (list (when (> waiting     0) (format "%d%s" waiting     baton-marker-waiting))
+                                (when (> error-count 0) (format "%d%s" error-count baton-marker-error))
+                                (when (> other       0) (format "%d%s" other       baton-marker-other))
+                                (when (> idle        0) (format "%d%s" idle        baton-marker-idle))
+                                (when (> running     0) (format "%d%s" running     baton-marker-running)))))
              (counts (mapconcat #'identity parts "/"))
              (unread-str (if (> unread 0) (format " %d%s" unread baton-marker-unread) ""))
              (str (format " B[%s%s]" counts unread-str))
-             (face (if (zerop waiting) 'mode-line 'baton-face-modeline-alert))
+             (face (if (zerop (+ waiting error-count)) 'mode-line 'baton-face-modeline-alert))
              (map (make-sparse-keymap)))
         (define-key map [mode-line mouse-1] #'baton-list)
         (propertize str
@@ -156,13 +182,14 @@ No-op if the session has returned to `running'."
         (plist-put (baton--session-metadata session) :idle-notify-timer nil))
   (let ((status (baton--session-status session)))
     (when (or (eq status 'waiting)
-              (and (eq status 'idle) (baton-session-unread-p session)))
+              (and (memq status '(error other idle))
+                   (baton-session-unread-p session)))
       (funcall baton-notify-function session))))
 
 (defun baton-notify--on-status-changed (session _old-status new-status)
   "Handle SESSION status change from OLD-STATUS to NEW-STATUS."
   (force-mode-line-update t)
-  (if (memq new-status '(waiting idle))
+  (if (memq new-status '(waiting error other idle))
       (progn
         (baton-notify--cancel-idle-timer session)
         (setf (baton--session-metadata session)
@@ -193,6 +220,8 @@ No-op if the session has returned to `running'."
   (pcase (baton--session-status session)
     ('waiting (propertize "●" 'face 'baton-face-waiting))
     ('running (propertize "▷" 'face 'baton-face-running))
+    ('error   (propertize "✕" 'face 'baton-face-error))
+    ('other   (propertize "?" 'face 'baton-face-other))
     ('idle
      (if (baton-session-unread-p session)
          (concat (propertize "○" 'face 'baton-face-idle)
@@ -204,6 +233,8 @@ No-op if the session has returned to `running'."
   "Return the display face for SESSION based on its status."
   (pcase (baton--session-status session)
     ('waiting 'baton-face-waiting)
+    ('error   'baton-face-error)
+    ('other   'baton-face-other)
     ('idle    'baton-face-idle)
     (_        'default)))
 

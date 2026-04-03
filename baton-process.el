@@ -26,16 +26,19 @@
 (declare-function vterm-send-string   "vterm" (string &optional paste-p))
 (declare-function vterm-send-key      "vterm" (key &optional shift meta ctrl))
 
-;;; Pattern Matching (pure, no vterm dependency)
+;;; Status Function Utilities (pure, no vterm dependency)
 
-(defun baton-process--match-patterns (text waiting-patterns)
-  "Match TEXT against WAITING-PATTERNS.
-WAITING-PATTERNS is an alist of (REGEXP . REASON) strings.
-
-Returns (cons :waiting REASON) if a waiting pattern matched, nil otherwise."
-  (when-let* ((match (cl-find-if (lambda (entry) (string-match-p (car entry) text))
-                                 waiting-patterns)))
-    (cons :waiting (cdr match))))
+(defun baton-process-make-regex-status-function (patterns)
+  "Return a status function built from PATTERNS.
+PATTERNS is an alist of (REGEXP . (KEYWORD . REASON)) pairs.
+KEYWORD may be :waiting, :error, :other, :running, or :idle.
+The returned function takes TEXT and returns (KEYWORD . REASON) for
+the first matching REGEXP, or nil if none match."
+  (lambda (text)
+    (when-let* ((match (cl-find-if
+                        (lambda (entry) (string-match-p (car entry) text))
+                        patterns)))
+      (cdr match))))
 
 ;;; Buffer-local session reference
 
@@ -147,8 +150,8 @@ the buffer again (it is already being killed)."
       (run-hook-with-args 'baton-session-killed-hook session))))
 
 (defun baton-process--reset-to-running (session)
-  "Reset SESSION to `running' status if it is currently `waiting' or `idle'."
-  (when (memq (baton--session-status session) '(waiting idle))
+  "Reset SESSION to `running' status if it is not already running."
+  (unless (eq (baton--session-status session) 'running)
     (baton-session-set-status session 'running)))
 
 (defconst baton-process--input-commands
@@ -160,10 +163,10 @@ the buffer again (it is already being killed)."
 
 (defun baton-process--on-input ()
   "Reset session to `running' when the user sends input to the vterm.
-Handles both `waiting' and `idle' sessions.  Also resets the quiet-period
-clock so the watcher does not immediately re-derive the prior state."
+Handles any non-running session.  Also resets the quiet-period clock so the
+watcher does not immediately re-derive the prior state."
   (when (and baton--current-session
-             (memq (baton--session-status baton--current-session) '(waiting idle))
+             (not (eq (baton--session-status baton--current-session) 'running))
              (memq this-command baton-process--input-commands))
     (baton-session-set-status baton--current-session 'running)
     (setf (baton--session-metadata baton--current-session)
@@ -238,16 +241,19 @@ waiting pattern matches, `idle' otherwise.  Tracks `:current-hash' and
           (let* ((agent-sym (baton--session-agent session))
                  (agent-def (and (boundp 'baton-agents)
                                  (gethash agent-sym baton-agents)))
-                 (waiting-patterns (and agent-def (plist-get agent-def :waiting-patterns)))
-                 (result (baton-process--match-patterns text waiting-patterns))
+                 (status-fn (and agent-def (plist-get agent-def :status-function)))
+                 (raw-result (when status-fn (funcall status-fn text)))
                  ;; Preserve "diff review" while a pending diff awaits the user,
-                 ;; regardless of what patterns the terminal output matches.
+                 ;; regardless of what the status function returns.
                  (result (if (plist-get meta :pending-diff)
                              '(:waiting . "diff review")
-                           result)))
-            (if (and (consp result) (eq (car result) :waiting))
-                (baton-session-set-status session 'waiting (cdr result))
-              (baton-session-set-status session 'idle)))))
+                           raw-result)))
+            (pcase (and (consp result) (car result))
+              (:waiting (baton-session-set-status session 'waiting (cdr result)))
+              (:running (baton-session-set-status session 'running))
+              (:error   (baton-session-set-status session 'error   (cdr result)))
+              (:other   (baton-session-set-status session 'other   (cdr result)))
+              (_        (baton-session-set-status session 'idle))))))
         ;; Mark session read while buffer is visible
         (when (get-buffer-window buf t)
           (setf (baton--session-metadata session)
