@@ -28,17 +28,25 @@
 
 ;;; Status Function Utilities (pure, no vterm dependency)
 
+(defun baton-process-session-tail (session)
+  "Return the last `baton-process--scan-lines' lines of SESSION's buffer, or \"\"."
+  (let ((buf (baton--session-buffer session)))
+    (if (and buf (buffer-live-p buf))
+        (baton-process--buffer-tail buf)
+      "")))
+
 (defun baton-process-make-regex-status-function (patterns)
   "Return a status function built from PATTERNS.
 PATTERNS is an alist of (REGEXP . (KEYWORD . REASON)) pairs.
 KEYWORD may be :waiting, :error, :other, :running, or :idle.
-The returned function takes TEXT and returns (KEYWORD . REASON) for
+The returned function takes SESSION and returns (KEYWORD . REASON) for
 the first matching REGEXP, or nil if none match."
-  (lambda (text)
-    (when-let* ((match (cl-find-if
-                        (lambda (entry) (string-match-p (car entry) text))
-                        patterns)))
-      (cdr match))))
+  (lambda (session)
+    (let ((text (baton-process-session-tail session)))
+      (when-let* ((match (cl-find-if
+                          (lambda (entry) (string-match-p (car entry) text))
+                          patterns)))
+        (cdr match)))))
 
 ;;; Buffer-local session reference
 
@@ -241,8 +249,10 @@ waiting pattern matches, `idle' otherwise.  Tracks `:current-hash' and
           (let* ((agent-sym (baton--session-agent session))
                  (agent-def (and (boundp 'baton-agents)
                                  (gethash agent-sym baton-agents)))
-                 (status-fn (and agent-def (plist-get agent-def :status-function)))
-                 (raw-result (when status-fn (funcall status-fn text)))
+                 (status-fn  (and agent-def (plist-get agent-def :status-function)))
+                 (trigger    (and agent-def (plist-get agent-def :status-function-trigger)))
+                 (raw-result (when (and status-fn (eq trigger :periodic))
+                               (funcall status-fn session)))
                  ;; Preserve "diff review" while a pending diff awaits the user,
                  ;; regardless of what the status function returns.
                  (result (if (plist-get meta :pending-diff)

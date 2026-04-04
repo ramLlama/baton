@@ -81,6 +81,7 @@ Even when the terminal output matches a different waiting pattern (e.g.
     (baton-define-agent
      :name 'claude-code
      :command "claude"
+     :status-function-trigger :periodic
      :status-function (baton-process-make-regex-status-function
                        '(("Do you want to" . (:waiting . "confirmation")))))
     (let* ((s (baton-session-create :agent 'claude-code
@@ -139,7 +140,8 @@ Even when the terminal output matches a different waiting pattern (e.g.
   "baton-monet-setup registers openDiff in :baton set and enables it."
   (skip-unless (featurep 'monet))
   (baton-test-with-clean-state
-    (baton-define-agent :name 'claude-code :command "claude")
+    (baton-define-agent :name 'claude-code :command "claude"
+                        :status-function-trigger :periodic)
     (let ((monet--tool-registry nil)
           (monet--enabled-sets '(:core :simple-diff))
           (monet-open-diff-tool-schema nil))

@@ -38,24 +38,33 @@
 
 (defvar baton-agents (make-hash-table :test 'eq)
   "Hash table mapping agent symbols to their definition plists.
-Each plist has keys: :command, :args, :status-function, :env-functions.")
+Each plist has keys: :command, :args, :status-function,
+:status-function-trigger, :env-functions.")
 
 (cl-defun baton-define-agent (&key name command (args nil)
-                               (status-function nil) (env-functions nil))
+                               (status-function nil)
+                               status-function-trigger
+                               (env-functions nil))
   "Define or redefine an agent.
 NAME is a symbol (e.g. `claude-code').
 COMMAND is the shell command string.
 ARGS is a list of default arguments (default: nil).
-STATUS-FUNCTION is an optional function (TEXT) -> (cons KEYWORD VALUE) or nil.
+STATUS-FUNCTION is an optional function (SESSION) -> (cons KEYWORD VALUE) or nil.
 KEYWORD may be :waiting, :error, :other, :running, or :idle; nil means idle.
-Use `baton-process-make-regex-status-function' to build one from a pattern
-alist.
+Use `baton-process-make-regex-status-function' to build one from a pattern alist.
+STATUS-FUNCTION-TRIGGER is required: `:periodic' means the watcher calls
+STATUS-FUNCTION on each quiet-period tick; `:on-event' means status is driven
+by external events (e.g., hook handlers) and the watcher never calls it.
 ENV-FUNCTIONS is a list of functions (KEY DIRECTORY) -> list of
 \"VAR=VALUE\" strings (default: nil)."
+  (unless (memq status-function-trigger '(:periodic :on-event))
+    (error "baton-define-agent: :status-function-trigger must be `:periodic' or `:on-event', got %S"
+           status-function-trigger))
   (puthash name
            (list :command command
                  :args args
                  :status-function status-function
+                 :status-function-trigger status-function-trigger
                  :env-functions env-functions)
            baton-agents))
 
@@ -77,6 +86,7 @@ AGENT is a symbol key in `baton-agents'."
  :name 'claude-code
  :command "claude"
  :args '()
+ :status-function-trigger :periodic
  ;; Patterns are matched against the last 250 lines — keep them specific.
  :status-function (baton-process-make-regex-status-function
                    '(("╭─" . (:waiting . "input prompt"))
@@ -88,6 +98,7 @@ AGENT is a symbol key in `baton-agents'."
  :name 'aider
  :command "aider"
  :args '()
+ :status-function-trigger :periodic
  :status-function (baton-process-make-regex-status-function
                    '(("^> " . (:waiting . "input prompt"))
                      ("Add these files" . (:waiting . "confirmation"))
@@ -97,6 +108,7 @@ AGENT is a symbol key in `baton-agents'."
  :name 'codex
  :command "codex"
  :args '()
+ :status-function-trigger :periodic
  :status-function (baton-process-make-regex-status-function
                    '(("^> " . (:waiting . "input prompt"))
                      ("\\[y/N\\]" . (:waiting . "confirmation")))))

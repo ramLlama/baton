@@ -65,9 +65,10 @@ The central data structure. A `cl-defstruct` with fields:
 A hash-table (`eq` test) mapping agent-type symbols to definition plists. Each plist has:
 - `:command` -- shell command string
 - `:args` -- default argument list
-- `:status-function` -- optional function `(TEXT) -> (cons KEYWORD VALUE) | nil`. KEYWORD may be `:waiting`, `:error`, `:other`, `:running`, or `:idle` (nil also means idle). Use `baton-process-make-regex-status-function` to build pattern-based status functions; its alist format is `(REGEXP . (KEYWORD . REASON))`.
+- `:status-function` -- optional function `(SESSION) -> (cons KEYWORD VALUE) | nil`. Receives a `baton--session` struct; call `baton-process-session-tail` internally to get buffer text if needed. KEYWORD may be `:waiting`, `:error`, `:other`, `:running`, or `:idle` (nil also means idle). `baton-process-make-regex-status-function` builds a pattern-based status function (calls `baton-process-session-tail` automatically); its alist format is `(REGEXP . (KEYWORD . REASON))`.
+- `:status-function-trigger` -- required symbol: `:periodic` (watcher calls status function each tick) or `:on-event` (status function is driven by external hooks, not the watcher). `baton-define-agent` validates this value and signals an error for anything else.
 
-Register new types with `baton-define-agent`. Three built-in: `claude-code`, `aider`, `codex`.
+Register new types with `baton-define-agent`. Three built-in: `claude-code`, `aider`, `codex` (all `:periodic`).
 
 ### Session Registries
 
@@ -128,13 +129,13 @@ The watcher is a repeating timer (0.5s interval) per session. On each tick:
 1. Read last 250 lines of the vterm buffer; MD5-hash the text
 2. Update `:current-hash` in metadata
 3. If hash changed: update `:last-output-time`; derive status `running`
-4. If hash stable ≥ 0.5s: call `:status-function` with text; dispatch on keyword: `:waiting` → waiting, `:running` → running, `:error` → error, `:other` → other, nil/unknown → idle
+4. If hash stable ≥ 0.5s AND trigger is `:periodic`: call `:status-function` with the session struct; dispatch on keyword: `:waiting` -> waiting, `:running` -> running, `:error` -> error, `:other` -> other, nil/unknown -> idle. For `:on-event` sessions the watcher skips the status function call and falls through to idle.
 5. `set-status` is guarded — only fires the hook when state or reason actually changes
 6. If buffer is visible in any window: update `:last-seen-hash` (marks session read)
 7. Fire `baton-session-unread-changed-hook` if session transitioned read→unread this tick
 8. Call `force-mode-line-update t` to keep unread counts current
 
-The `:status-function` is **pure** -- takes `(TEXT)`, returns `(cons KEYWORD REASON)` or `nil`. No vterm dependency, fully unit-testable. `baton-process-make-regex-status-function` builds one from a pattern alist.
+The `:status-function` takes `(SESSION)` (a `baton--session` struct), returns `(cons KEYWORD REASON)` or `nil`. Use `baton-process-session-tail` inside a status function to get the last 250 lines of buffer text. `baton-process-make-regex-status-function` builds a pattern-based status function that calls `baton-process-session-tail` automatically. The watcher only invokes the status function for `:periodic` agents; `:on-event` agents will be driven by external hooks (not yet implemented).
 
 ### Notification Surface
 
