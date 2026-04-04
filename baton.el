@@ -31,8 +31,9 @@
 (require 'baton-notify)
 (require 'baton-alert)
 
-(declare-function baton-monet-setup "baton-monet" ())
-(declare-function baton-review-diff "baton-monet" (session-name))
+(declare-function baton-monet-setup    "baton-monet" ())
+(declare-function baton-monet--teardown "baton-monet" ())
+(declare-function baton-review-diff    "baton-monet" (session-name))
 
 ;;; Agent Registry
 
@@ -49,8 +50,8 @@ Each plist has keys: :command, :args, :status-function,
 NAME is a symbol (e.g. `claude-code').
 COMMAND is the shell command string.
 ARGS is a list of default arguments (default: nil).
-STATUS-FUNCTION is an optional function (SESSION) -> (cons KEYWORD VALUE) or nil.
-KEYWORD may be :waiting, :error, :other, :running, or :idle; nil means idle.
+STATUS-FUNCTION is an optional function (SESSION) -> (cons SYMBOL VALUE) or nil.
+SYMBOL may be waiting, error, other, running, or idle; nil means idle.
 Use `baton-process-make-regex-status-function' to build one from a pattern alist.
 STATUS-FUNCTION-TRIGGER is required: `:periodic' means the watcher calls
 STATUS-FUNCTION on each quiet-period tick; `:on-event' means status is driven
@@ -89,10 +90,10 @@ AGENT is a symbol key in `baton-agents'."
  :status-function-trigger :periodic
  ;; Patterns are matched against the last 250 lines — keep them specific.
  :status-function (baton-process-make-regex-status-function
-                   '(("╭─" . (:waiting . "input prompt"))
-                     ("Allow.*tool\\|Allow.*command\\|Bash.*Allow" . (:waiting . "permission prompt"))
-                     ("Do you want to\\|Would you like to" . (:waiting . "confirmation"))
-                     ("\\[Y/n\\]\\|\\[y/N\\]" . (:waiting . "confirmation")))))
+                   '(("╭─" . (waiting . "input prompt"))
+                     ("Allow.*tool\\|Allow.*command\\|Bash.*Allow" . (waiting . "permission prompt"))
+                     ("Do you want to\\|Would you like to" . (waiting . "confirmation"))
+                     ("\\[Y/n\\]\\|\\[y/N\\]" . (waiting . "confirmation")))))
 
 (baton-define-agent
  :name 'aider
@@ -100,9 +101,9 @@ AGENT is a symbol key in `baton-agents'."
  :args '()
  :status-function-trigger :periodic
  :status-function (baton-process-make-regex-status-function
-                   '(("^> " . (:waiting . "input prompt"))
-                     ("Add these files" . (:waiting . "confirmation"))
-                     ("\\[Y/n\\]" . (:waiting . "confirmation")))))
+                   '(("^> " . (waiting . "input prompt"))
+                     ("Add these files" . (waiting . "confirmation"))
+                     ("\\[Y/n\\]" . (waiting . "confirmation")))))
 
 (baton-define-agent
  :name 'codex
@@ -110,8 +111,8 @@ AGENT is a symbol key in `baton-agents'."
  :args '()
  :status-function-trigger :periodic
  :status-function (baton-process-make-regex-status-function
-                   '(("^> " . (:waiting . "input prompt"))
-                     ("\\[y/N\\]" . (:waiting . "confirmation")))))
+                   '(("^> " . (waiting . "input prompt"))
+                     ("\\[y/N\\]" . (waiting . "confirmation")))))
 
 ;;; Customization Group
 
@@ -251,7 +252,9 @@ prompt is shown unless a prefix argument is given."
           (when (and (boundp 'monet-mode) monet-mode)
             (baton-monet-setup))))
     (baton--teardown-hooks)
-    (baton-modeline-mode -1)))
+    (baton-modeline-mode -1)
+    (when (featurep 'baton-monet)
+      (baton-monet--teardown))))
 
 ;;; Transient Dispatch
 

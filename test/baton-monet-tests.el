@@ -83,7 +83,7 @@ Even when the terminal output matches a different waiting pattern (e.g.
      :command "claude"
      :status-function-trigger :periodic
      :status-function (baton-process-make-regex-status-function
-                       '(("Do you want to" . (:waiting . "confirmation")))))
+                       '(("Do you want to" . (waiting . "confirmation")))))
     (let* ((s (baton-session-create :agent 'claude-code
                                      :command "claude"
                                      :directory "/proj"))
@@ -148,6 +148,171 @@ Even when the terminal output matches a different waiting pattern (e.g.
       (baton-monet-setup)
       (should (assoc (cons :baton "openDiff") monet--tool-registry))
       (should (memq :baton monet--enabled-sets)))))
+
+;;; ─── baton-monet--set-state tests ───────────────────────────────────────────
+
+(ert-deftest baton-test-monet-set-state-writes-metadata ()
+  "baton-monet--set-state writes :state plist into session metadata."
+  (baton-test-with-clean-state
+    (let ((s (baton-session-create :agent 'claude-code
+                                    :command "claude"
+                                    :directory "/proj")))
+      (baton-monet--set-state s 'waiting "input prompt")
+      (let ((state (plist-get (baton--session-metadata s) :state)))
+        (should state)
+        (should (eq (plist-get state :status) 'waiting))
+        (should (equal (plist-get state :reason) "input prompt"))
+        (should (floatp (plist-get state :at)))))))
+
+(ert-deftest baton-test-monet-set-state-applies-status ()
+  "baton-monet--set-state updates the session's status field."
+  (baton-test-with-clean-state
+    (let ((s (baton-session-create :agent 'claude-code
+                                    :command "claude"
+                                    :directory "/proj")))
+      (baton-monet--set-state s 'idle)
+      (should (eq (baton--session-status s) 'idle)))))
+
+(ert-deftest baton-test-monet-hook-status-fn-reads-state ()
+  "baton-monet--hook-status-fn returns (status . reason) from :state metadata."
+  (baton-test-with-clean-state
+    (let ((s (baton-session-create :agent 'claude-code
+                                    :command "claude"
+                                    :directory "/proj")))
+      (setf (baton--session-metadata s)
+            (list :state '(:status waiting :reason "input prompt" :at 0.0)))
+      (should (equal (baton-monet--hook-status-fn s) '(waiting . "input prompt"))))))
+
+(ert-deftest baton-test-monet-hook-status-fn-nil-when-no-state ()
+  "baton-monet--hook-status-fn returns nil when :state is nil."
+  (baton-test-with-clean-state
+    (let ((s (baton-session-create :agent 'claude-code
+                                    :command "claude"
+                                    :directory "/proj")))
+      (should (null (baton-monet--hook-status-fn s))))))
+
+;;; ─── baton-monet--claude-hook-handler tests ─────────────────────────────────
+
+(ert-deftest baton-test-monet-hook-handler-user-prompt-submit ()
+  "UserPromptSubmit event sets session to running."
+  (baton-test-with-clean-state
+    (let* ((s (baton-session-create :agent 'claude-code
+                                     :command "claude"
+                                     :directory "/proj"))
+           (ctx `((baton_session . ,(baton--session-name s)))))
+      (baton-session-set-status s 'idle)
+      (baton-monet--claude-hook-handler "UserPromptSubmit" nil ctx)
+      (should (eq (baton--session-status s) 'running)))))
+
+(ert-deftest baton-test-monet-hook-handler-stop ()
+  "Stop event sets session to idle."
+  (baton-test-with-clean-state
+    (let* ((s (baton-session-create :agent 'claude-code
+                                     :command "claude"
+                                     :directory "/proj"))
+           (ctx `((baton_session . ,(baton--session-name s)))))
+      (baton-monet--claude-hook-handler "Stop" nil ctx)
+      (should (eq (baton--session-status s) 'idle)))))
+
+(ert-deftest baton-test-monet-hook-handler-notification-with-message ()
+  "Notification event sets session to waiting with message as reason."
+  (baton-test-with-clean-state
+    (let* ((s (baton-session-create :agent 'claude-code
+                                     :command "claude"
+                                     :directory "/proj"))
+           (ctx `((baton_session . ,(baton--session-name s))))
+           (data '((message . "tool requires approval"))))
+      (baton-monet--claude-hook-handler "Notification" data ctx)
+      (should (eq (baton--session-status s) 'waiting))
+      (should (equal (baton--session-waiting-reason s) "tool requires approval")))))
+
+(ert-deftest baton-test-monet-hook-handler-notification-default-reason ()
+  "Notification event with no message uses \"input prompt\" as reason."
+  (baton-test-with-clean-state
+    (let* ((s (baton-session-create :agent 'claude-code
+                                     :command "claude"
+                                     :directory "/proj"))
+           (ctx `((baton_session . ,(baton--session-name s)))))
+      (baton-monet--claude-hook-handler "Notification" nil ctx)
+      (should (eq (baton--session-status s) 'waiting))
+      (should (equal (baton--session-waiting-reason s) "input prompt")))))
+
+(ert-deftest baton-test-monet-hook-handler-no-session-no-op ()
+  "Missing baton_session in ctx causes handler to do nothing."
+  (baton-test-with-clean-state
+    (let* ((s (baton-session-create :agent 'claude-code
+                                     :command "claude"
+                                     :directory "/proj"))
+           (initial-status (baton--session-status s)))
+      ;; ctx has no baton_session key
+      (baton-monet--claude-hook-handler "Stop" nil nil)
+      (should (eq (baton--session-status s) initial-status)))))
+
+(ert-deftest baton-test-monet-hook-handler-pending-diff-skipped ()
+  "Handler skips dispatch when :pending-diff is set in session metadata."
+  (baton-test-with-clean-state
+    (let* ((s (baton-session-create :agent 'claude-code
+                                     :command "claude"
+                                     :directory "/proj"))
+           (ctx `((baton_session . ,(baton--session-name s)))))
+      (baton-session-set-status s 'waiting "diff review")
+      (setf (baton--session-metadata s)
+            (plist-put (baton--session-metadata s) :pending-diff (lambda () t)))
+      ;; Stop event would normally set idle, but pending-diff protects it
+      (baton-monet--claude-hook-handler "Stop" nil ctx)
+      (should (eq (baton--session-status s) 'waiting))
+      (should (equal (baton--session-waiting-reason s) "diff review")))))
+
+;;; ─── baton-monet--session-env-function tests ────────────────────────────────
+
+(ert-deftest baton-test-monet-session-env-function ()
+  "baton-monet--session-env-function returns MONET_CTX_baton_session env var."
+  (should (equal (baton-monet--session-env-function "claude-1" "/proj")
+                 '("MONET_CTX_baton_session=claude-1"))))
+
+;;; ─── baton-monet-setup / baton-monet--teardown tests ────────────────────────
+
+(ert-deftest baton-test-monet-setup-switches-claude-to-on-event ()
+  "baton-monet-setup switches claude-code from :periodic to :on-event trigger."
+  (skip-unless (featurep 'monet))
+  (baton-test-with-clean-state
+    (let ((original-fn (lambda (_s) nil)))
+      (baton-define-agent :name 'claude-code :command "claude"
+                          :status-function-trigger :periodic
+                          :status-function original-fn)
+      (let ((monet--tool-registry nil)
+            (monet--enabled-sets '(:core :simple-diff))
+            (monet-open-diff-tool-schema nil)
+            (monet--claude-hook-functions nil)
+            (baton-monet--saved-claude-status-fn nil)
+            (baton-monet--saved-claude-trigger nil))
+        (baton-monet-setup)
+        (let ((def (gethash 'claude-code baton-agents)))
+          (should (eq (plist-get def :status-function-trigger) :on-event))
+          (should (eq (plist-get def :status-function) #'baton-monet--hook-status-fn)))
+        (should (eq baton-monet--saved-claude-trigger :periodic))
+        (should (eq baton-monet--saved-claude-status-fn original-fn))))))
+
+(ert-deftest baton-test-monet-teardown-restores-claude ()
+  "baton-monet--teardown restores claude-code's original trigger and status-fn."
+  (skip-unless (featurep 'monet))
+  (baton-test-with-clean-state
+    (let ((original-fn (lambda (_s) nil)))
+      (baton-define-agent :name 'claude-code :command "claude"
+                          :status-function-trigger :periodic
+                          :status-function original-fn)
+      (let ((monet--tool-registry nil)
+            (monet--enabled-sets '(:core :simple-diff))
+            (monet-open-diff-tool-schema nil)
+            (monet--claude-hook-functions nil)
+            (baton-monet--saved-claude-status-fn nil)
+            (baton-monet--saved-claude-trigger nil))
+        (baton-monet-setup)
+        (baton-monet--teardown)
+        (let ((def (gethash 'claude-code baton-agents)))
+          (should (eq (plist-get def :status-function-trigger) :periodic))
+          (should (eq (plist-get def :status-function) original-fn)))
+        (should-not (memq #'baton-monet--claude-hook-handler monet--claude-hook-functions))))))
 
 (provide 'baton-monet-tests)
 ;;; baton-monet-tests.el ends here

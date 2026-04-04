@@ -37,9 +37,9 @@
 
 (defun baton-process-make-regex-status-function (patterns)
   "Return a status function built from PATTERNS.
-PATTERNS is an alist of (REGEXP . (KEYWORD . REASON)) pairs.
-KEYWORD may be :waiting, :error, :other, :running, or :idle.
-The returned function takes SESSION and returns (KEYWORD . REASON) for
+PATTERNS is an alist of (REGEXP . (SYMBOL . REASON)) pairs.
+SYMBOL may be waiting, error, other, running, or idle.
+The returned function takes SESSION and returns (SYMBOL . REASON) for
 the first matching REGEXP, or nil if none match."
   (lambda (session)
     (let ((text (baton-process-session-tail session)))
@@ -119,7 +119,8 @@ named \"*baton:<name>*\" and the session's buffer slot is updated."
             (list :last-output-time now
                   :last-output-hash ""
                   :current-hash ""
-                  :last-seen-hash nil)))
+                  :last-seen-hash nil
+                  :state nil)))
     (baton-process--start-watcher session)
     buf))
 
@@ -256,13 +257,13 @@ waiting pattern matches, `idle' otherwise.  Tracks `:current-hash' and
                  ;; Preserve "diff review" while a pending diff awaits the user,
                  ;; regardless of what the status function returns.
                  (result (if (plist-get meta :pending-diff)
-                             '(:waiting . "diff review")
+                             '(waiting . "diff review")
                            raw-result)))
             (pcase (and (consp result) (car result))
-              (:waiting (baton-session-set-status session 'waiting (cdr result)))
-              (:running (baton-session-set-status session 'running))
-              (:error   (baton-session-set-status session 'error   (cdr result)))
-              (:other   (baton-session-set-status session 'other   (cdr result)))
+              ('waiting (baton-session-set-status session 'waiting (cdr result)))
+              ('running (baton-session-set-status session 'running))
+              ('error   (baton-session-set-status session 'error   (cdr result)))
+              ('other   (baton-session-set-status session 'other   (cdr result)))
               (_        (baton-session-set-status session 'idle))))))
         ;; Mark session read while buffer is visible
         (when (get-buffer-window buf t)

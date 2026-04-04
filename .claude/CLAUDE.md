@@ -21,8 +21,8 @@ baton/
   baton-process.el    -- vterm spawning, 500ms debounced output watcher, pure pattern matcher
   baton-notify.el     -- Modeline segment B[Nw/Ni/Nr N*], *Baton* tabulated-list buffer, baton-jump
   baton-alert.el      -- Desktop alert backend registry: alerter, OSC 777, D-Bus/toast, echo fallback
-  baton-monet.el      -- Optional monet integration: overrides openDiff tool for diff-review awareness
-  baton.el            -- Agent-type registry, baton-mode global minor mode, user commands, keymaps
+  baton-monet.el      -- Optional monet integration: openDiff override, event-driven status via hook handler
+  baton.el            -- Agent registry, baton-mode global minor mode, user commands, keymaps
   test/
     baton-test-helpers.el   -- Shared ERT macros (baton-test-with-clean-state, baton-alert-test-with-clean-state)
     baton-session-tests.el  -- Session lifecycle and unread tests
@@ -61,7 +61,7 @@ Ensure `vterm` is installed in your Emacs. Optionally clone monet to `../monet`.
 ### Run tests
 
 ```bash
-make test                        # all tests in test/ directory (1 skipped without monet)
+make test                        # byte-compile then run all tests (1 skipped without monet)
 make test MATCH=monet            # run only tests matching "monet"
 make test MONET_DIR=../monet     # include monet for full coverage
 ```
@@ -95,6 +95,7 @@ M-x ert RET baton-test-session-create-returns-struct RET
 - `when-let*` is preferred over nested `when`/`let` for nil-guarded bindings
 - No `require 'vterm` at top level -- only inside functions that need it (`baton-process-spawn`)
 - Optional dependencies use `declare-function` for byte-compiler silence + `featurep` guards at runtime
+- `:status-function` returns `(SYMBOL . REASON)` where SYMBOL is a plain symbol (`waiting`, `idle`, `running`, `error`, `other`), not a keyword. Pattern alists use the same convention: `(REGEXP . (SYMBOL . REASON))`.
 
 ## Further Reading
 

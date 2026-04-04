@@ -10,7 +10,7 @@
 
 5. **Unread is purely computed** via `baton-session-unread-p` — no stored flag. It compares `:current-hash` (updated each tick) to `:last-seen-hash` (updated while buffer is visible). The `baton-session-unread-changed-hook` is fired only on the first tick where a session transitions from read to unread.
 
-6. **The test isolation macro `baton-test-with-clean-state`** lives in `test/baton-test-helpers.el`. It rebinds all global state (sessions, counters, agent-types, hooks including `baton-session-unread-changed-hook`) with `let`. Always use it in tests to avoid cross-contamination.
+6. **The test isolation macro `baton-test-with-clean-state`** lives in `test/baton-test-helpers.el`. It rebinds all global state (sessions, counters, agents, hooks including `baton-session-unread-changed-hook`) with `let`. Always use it in tests to avoid cross-contamination.
 
 7. **The monet test requires monet** (`skip-unless (featurep 'monet)`). Set `MONET_DIR=../monet` in make invocations for full test coverage.
 
@@ -20,7 +20,7 @@
 
 10. **No `:lighter` on `baton-mode`**. The modeline indicator comes from `baton-modeline-mode` which adds to `global-mode-string`, not from the mode lighter.
 
-11. **Session auto-naming** uses the first segment of the agent-type symbol name (e.g., `claude-code` -> `"claude-1"`). The counter is per agent-type. `C-u baton-new` prompts for an explicit name.
+11. **Session auto-naming** uses the first segment of the agent symbol name (e.g., `claude-code` -> `"claude-1"`). The counter is per agent. `C-u baton-new` prompts for an explicit name.
 
 12. **`baton-monet--find-session`** prefers `claude-code` sessions when multiple sessions share a directory. This is intentional -- monet integration is specific to Claude Code.
 

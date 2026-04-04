@@ -46,7 +46,7 @@ checkdoc:
 	    | grep -v "should be imperative" || true ; \
 	done
 
-test:
+test: compile
 	$(EMACS) --batch $(LOAD_PATHS) \
 	  --eval "(package-initialize)" \
 	  -l ert \

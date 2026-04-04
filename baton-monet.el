@@ -31,6 +31,8 @@
 (declare-function monet-ediff-tool "monet"
                   (old-file new-file new-contents on-accept on-quit &optional session))
 (declare-function monet-start-server-function "monet" (key directory))
+(declare-function monet-add-claude-hook-handler "monet" (handler))
+(declare-function monet-remove-claude-hook-handler "monet" (handler))
 (defvar monet-open-diff-tool-schema nil
   "MCP inputSchema for the openDiff tool (provided by monet).")
 
@@ -53,6 +55,76 @@ Returns nil if no match is found."
                    (baton-session-list))))
     (or (cl-find 'claude-code matches :key #'baton--session-agent)
         (car matches))))
+
+;;; Hook Integration State
+
+(defvar baton-monet--saved-claude-status-fn nil
+  "Saved :status-function for claude-code, restored by `baton-monet--teardown'.")
+
+(defvar baton-monet--saved-claude-trigger nil
+  "Saved :status-function-trigger for claude-code.
+Restored by `baton-monet--teardown'.")
+
+;;; Hook Status Function
+
+(defun baton-monet--hook-status-fn (session)
+  "Return the hook-derived status for SESSION from its :state metadata.
+Returns (STATUS . REASON) when :state is set, or nil."
+  (when-let* ((state (plist-get (baton--session-metadata session) :state)))
+    (cons (plist-get state :status) (plist-get state :reason))))
+
+;;; Hook State Writer
+
+(defun baton-monet--set-state (session status &optional reason)
+  "Write STATUS and REASON into SESSION's :state metadata with a timestamp.
+Also calls `baton-session-set-status' so the change is applied immediately."
+  (setf (baton--session-metadata session)
+        (plist-put (baton--session-metadata session)
+                   :state `(:status ,status :reason ,reason :at ,(float-time))))
+  (baton-session-set-status session status reason))
+
+;;; Session Env Function
+
+(defun baton-monet--session-env-function (session-name _directory)
+  "Return env vars injecting SESSION-NAME into the Claude Code process environment.
+Injects MONET_CTX_baton_session so hook handlers can look up the session."
+  (list (format "MONET_CTX_baton_session=%s" session-name)))
+
+;;; Hook Handler
+
+(defun baton-monet--claude-hook-handler (event-name data ctx)
+  "Dispatch a Claude Code lifecycle event to the matching baton session.
+Looks up the session from baton_session in CTX.  Skips if the session
+has a :pending-diff (diff review is in progress).
+EVENT-NAME is the hook_event_name string, DATA is the payload alist,
+CTX is the monet_context alist."
+  (when-let* ((session-name (cdr (assq 'baton_session ctx)))
+              (session (baton-session-get session-name)))
+    (unless (plist-get (baton--session-metadata session) :pending-diff)
+      (pcase event-name
+        ("UserPromptSubmit" (baton-monet--set-state session 'running))
+        ("Stop"             (baton-monet--set-state session 'idle))
+        ("Notification"
+         (baton-monet--set-state session 'waiting
+                                 (or (cdr (assq 'message data)) "input prompt")))))))
+
+;;; Teardown
+
+(defun baton-monet--teardown ()
+  "Deregister baton's hook handler and restore claude-code's original status fn.
+Safe to call even if monet is not loaded."
+  (when (featurep 'monet)
+    (monet-remove-claude-hook-handler #'baton-monet--claude-hook-handler))
+  (remove-hook 'baton-session-status-changed-hook #'baton-monet--update-review-bar)
+  (when (boundp 'baton-list-mode-map)
+    (define-key baton-list-mode-map (kbd "r") nil))
+  (when (boundp 'baton-agents)
+    (when-let* ((def (gethash 'claude-code baton-agents)))
+      (puthash 'claude-code
+               (plist-put (plist-put def
+                                     :status-function-trigger baton-monet--saved-claude-trigger)
+                           :status-function baton-monet--saved-claude-status-fn)
+               baton-agents))))
 
 ;;; Diff Handler
 
@@ -206,8 +278,21 @@ Safe to call even if monet is not loaded — does nothing in that case."
      :set :baton)
     (monet-enable-tool-set :baton)
     (baton-add-env-function 'claude-code #'monet-start-server-function)
+    (baton-add-env-function 'claude-code #'baton-monet--session-env-function)
+    (monet-add-claude-hook-handler #'baton-monet--claude-hook-handler)
+    ;; Switch claude-code to event-driven status detection.
+    (when (boundp 'baton-agents)
+      (when-let* ((def (gethash 'claude-code baton-agents)))
+        (setq baton-monet--saved-claude-status-fn  (plist-get def :status-function))
+        (setq baton-monet--saved-claude-trigger     (plist-get def :status-function-trigger))
+        (puthash 'claude-code
+                 (plist-put (plist-put def
+                                       :status-function-trigger :on-event)
+                             :status-function #'baton-monet--hook-status-fn)
+                 baton-agents)))
     (define-key baton-list-mode-map (kbd "r") #'baton-list-review-diff)
-    (add-hook 'baton-session-status-changed-hook #'baton-monet--update-review-bar)))
+    (add-hook 'baton-session-status-changed-hook #'baton-monet--update-review-bar)
+    (message "baton-monet: hook integration active")))
 
 (provide 'baton-monet)
 ;;; baton-monet.el ends here

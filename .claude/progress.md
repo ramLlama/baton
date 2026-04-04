@@ -4,7 +4,7 @@
 `~/.claude/plans/elegant-strolling-donut.md`
 
 ## Status
-Commit 1 (monet) complete. Commits 2–4 (baton) not started.
+Commits 1–2 (monet + baton process trigger) complete. Commits 3–4 (baton) not started.
 
 ---
 
@@ -32,35 +32,31 @@ Commit 1 (monet) complete. Commits 2–4 (baton) not started.
 - `.claude/CLAUDE.md` and `.claude/hooks.md` updated in monet repo
 - Committed: `feat(hooks): replace shell hook script with Python + nested envelope`
 
+### baton — pre-commit hook + Make target
+- Makefile already had `pre-commit: checkdoc test compile`; added `default: compile`, renamed `all` → `pre-commit`
+- Created `.git/hooks/pre-commit` calling `make pre-commit`
+- Committed: `build: add pre-commit target and git hook`
+
+### baton — Commit 2 (status-fn API + `:status-function-trigger`)
+- **`baton-process-session-tail(session)`**: public fn; returns last 250 lines of
+  session's buffer as string, or `""` if buffer dead
+- **`baton-process-make-regex-status-function`**: returned fn takes `SESSION` (not
+  `TEXT`); calls `baton-process-session-tail` internally
+- **`baton-define-agent`**: new required key `:status-function-trigger` (`:periodic` or
+  `:on-event`); validates value, signals error for anything else
+- All three built-in agents (`claude-code`, `aider`, `codex`): `:status-function-trigger :periodic`
+- **Watcher** (`baton-process--watcher-tick`): checks `(eq trigger :periodic)` before
+  calling status-fn; calls `(funcall status-fn session)` not `(funcall status-fn text)`
+- **Tests**: all `baton-define-agent` calls updated with trigger; lambda signatures
+  changed from `(_text)` to `(_session)`; `baton-test-agent-status-function` rewritten
+  to use session+buffer; new tests for session-tail (live/dead) and on-event trigger
+- `.claude/` reorganized: CLAUDE.md split into domain-model.md, architecture.md,
+  gotchas.md, commands.md
+- Committed: `feat(process): add :status-function-trigger to agent registry`
+
 ---
 
 ## Remaining
-
-### Commit 2 — baton: status-fn API + `:status-function-trigger`
-**Files**: `baton-process.el`, `baton.el`, `test/baton-process-tests.el`, `.claude/CLAUDE.md`
-
-Key changes:
-- **`baton-process-session-tail(session)`**: new public fn; returns last 250 lines of
-  session's buffer as string, or `""` if buffer dead
-- **`baton-process-make-regex-status-function`**: returned fn now takes `SESSION` (not
-  `TEXT`); calls `baton-process-session-tail` internally
-- **`baton-define-agent`**: new required key `:status-function-trigger` (`:periodic` or
-  `:on-event`); signals error if absent
-- All three built-in agents (`claude-code`, `aider`, `codex`): add `:status-function-trigger :periodic`
-- **Watcher** (`baton-process--watcher-tick`): check `:status-function-trigger :periodic`
-  before calling status-fn; call `(funcall status-fn session)` not `(funcall status-fn text)`
-- **Tests**: all `baton-define-agent` calls need `:status-function-trigger`; lambda
-  signatures change from `(_text)` to `(_session)`; `baton-test-agent-status-function`
-  rewritten to use session+buffer; new tests for `baton-process-session-tail` (live/dead)
-  and trigger behavior (`:on-event` skips fn)
-- **`.claude/CLAUDE.md`**: `:status-function` takes `(SESSION)`; document
-  `:status-function-trigger`; remove "pure" characterization
-
-Note: at commit 2 entry point, `baton-process.el` has a partial edit already applied
-(the `baton-process-session-tail` function and updated `baton-process-make-regex-status-function`
-were written before context was cleared). Verify the file state before continuing — do
-NOT re-apply those two functions. The watcher call site and `baton.el` / test changes
-still need to be made.
 
 ### Commit 3 — baton: `:state` metadata field + hook integration
 **Files**: `baton-process.el`, `baton-monet.el`, `baton.el`, `test/baton-monet-tests.el`

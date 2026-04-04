@@ -38,9 +38,9 @@
      :command "cmd"
      :status-function-trigger :periodic
      :status-function (baton-process-make-regex-status-function
-                       '(("^> "  . (:waiting . "input"))
-                         ("Allow" . (:waiting . "permission"))
-                         ("CRASH" . (:error   . "crashed")))))
+                       '(("^> "  . (waiting . "input"))
+                         ("Allow" . (waiting . "permission"))
+                         ("CRASH" . (error   . "crashed")))))
     (let* ((fn (plist-get (gethash 'my-agent baton-agents) :status-function))
            (s (baton-session-create :agent 'my-agent :command "cmd" :directory "/tmp"))
            (buf (get-buffer-create " *baton-test-sf*")))
@@ -49,11 +49,11 @@
             (setf (baton--session-buffer s) buf)
             (should (functionp fn))
             (with-current-buffer buf (erase-buffer) (insert "> "))
-            (should (equal (funcall fn s) '(:waiting . "input")))
+            (should (equal (funcall fn s) '(waiting . "input")))
             (with-current-buffer buf (erase-buffer) (insert "Allow this tool"))
-            (should (equal (funcall fn s) '(:waiting . "permission")))
+            (should (equal (funcall fn s) '(waiting . "permission")))
             (with-current-buffer buf (erase-buffer) (insert "CRASH detected"))
-            (should (equal (funcall fn s) '(:error . "crashed")))
+            (should (equal (funcall fn s) '(error . "crashed")))
             (with-current-buffer buf (erase-buffer) (insert "nothing matches"))
             (should (null (funcall fn s))))
         (kill-buffer buf)))))
@@ -61,13 +61,13 @@
 ;;; ─── :status-function watcher dispatch tests ────────────────────────────────
 
 (ert-deftest baton-test-process-status-function-waiting ()
-  "A :status-function returning (:waiting . reason) sets session to waiting."
+  "A :status-function returning (waiting . reason) sets session to waiting."
   (baton-test-with-clean-state
     (baton-define-agent
      :name 'fn-agent
      :command "cmd"
      :status-function-trigger :periodic
-     :status-function (lambda (_session) '(:waiting . "fn-reason")))
+     :status-function (lambda (_session) '(waiting . "fn-reason")))
     (let* ((s (baton-session-create :agent 'fn-agent :command "cmd" :directory "/tmp"))
            (buf (get-buffer-create " *baton-test-sf-waiting*")))
       (unwind-protect
@@ -87,13 +87,13 @@
         (kill-buffer buf)))))
 
 (ert-deftest baton-test-process-status-function-running ()
-  "A :status-function returning (:running . nil) sets session to running."
+  "A :status-function returning (running . nil) sets session to running."
   (baton-test-with-clean-state
     (baton-define-agent
      :name 'fn-agent-running
      :command "cmd"
      :status-function-trigger :periodic
-     :status-function (lambda (_session) '(:running . nil)))
+     :status-function (lambda (_session) '(running . nil)))
     (let* ((s (baton-session-create :agent 'fn-agent-running :command "cmd" :directory "/tmp"))
            (buf (get-buffer-create " *baton-test-sf-running*")))
       (unwind-protect
@@ -229,7 +229,7 @@
        :name 'event-agent
        :command "cmd"
        :status-function-trigger :on-event
-       :status-function (lambda (_session) (setq called t) '(:waiting . "fn-called")))
+       :status-function (lambda (_session) (setq called t) '(waiting . "fn-called")))
       (let* ((s (baton-session-create :agent 'event-agent :command "cmd" :directory "/tmp"))
              (buf (get-buffer-create " *baton-test-on-event*")))
         (unwind-protect
