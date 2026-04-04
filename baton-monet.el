@@ -146,7 +146,7 @@ user to accept or reject the diff before continuing."
                     (setf (baton--session-metadata baton-session)
                           (plist-put (baton--session-metadata baton-session)
                                      :pending-diff nil))
-                    (baton-session-set-status baton-session 'running))))
+                    (baton-monet--set-state baton-session 'running))))
          (diff-fn
           (lambda (old new contents on-accept on-quit sess)
             (monet-ediff-tool
@@ -160,7 +160,7 @@ user to accept or reject the diff before continuing."
           (setf (baton--session-metadata baton-session)
                 (plist-put (baton--session-metadata baton-session)
                            :pending-diff (lambda () (funcall handler params monet-session))))
-          (baton-session-set-status baton-session 'waiting "diff review")
+          (baton-monet--set-state baton-session 'waiting "diff review")
           `((deferred . t) (unique-key . ,(alist-get 'tab_name params))))
       ;; No matching baton session — open the diff immediately.
       (funcall handler params monet-session))))
