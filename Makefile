@@ -23,9 +23,9 @@ EL_FILES := baton-session.el baton-process.el baton-notify.el \
 
 MATCH ?=
 
-.PHONY: all checkdoc compile test clean
+.PHONY: clean checkdoc test compile pre-commit
 
-default: all
+default: compile
 
 clean:
 	rm -f *.elc baton-autoloads.el
@@ -46,13 +46,6 @@ checkdoc:
 	    | grep -v "should be imperative" || true ; \
 	done
 
-compile: clean
-	$(EMACS) --batch $(LOAD_PATHS) \
-	  --eval "(package-initialize)" \
-	  --eval "(setq sentence-end-double-space nil)" \
-	  --eval "(package-generate-autoloads \"baton\" \".\")" \
-	  -f batch-byte-compile $(EL_FILES) 2>&1 | grep -v "vterm" || true
-
 test:
 	$(EMACS) --batch $(LOAD_PATHS) \
 	  --eval "(package-initialize)" \
@@ -65,4 +58,11 @@ test:
 	  $(foreach f,$(TEST_FILES),-l $(f)) \
 	  $(if $(MATCH),--eval "(ert-run-tests-batch-and-exit \"$(MATCH)\")",-f ert-run-tests-batch-and-exit)
 
-all: checkdoc compile
+compile: clean
+	$(EMACS) --batch $(LOAD_PATHS) \
+	  --eval "(package-initialize)" \
+	  --eval "(setq sentence-end-double-space nil)" \
+	  --eval "(package-generate-autoloads \"baton\" \".\")" \
+	  -f batch-byte-compile $(EL_FILES) 2>&1 | grep -v "vterm" || true
+
+pre-commit: checkdoc test compile
