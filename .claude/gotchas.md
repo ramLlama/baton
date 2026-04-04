@@ -8,7 +8,7 @@
 
 4. **`baton-process--on-input` resets the quiet-period clock**. When the user types in any non-running session, `:last-output-time` is reset to now and the session is set to `running`, preventing the watcher from immediately re-deriving the prior state before the agent has had a chance to respond.
 
-5. **Unread is purely computed** via `baton-session-unread-p` — no stored flag. It compares `:current-hash` (updated each tick) to `:last-seen-hash` (updated while buffer is visible). The `baton-session-unread-changed-hook` is fired only on the first tick where a session transitions from read to unread.
+5. **Unread is a stored boolean flag** (`:unread` in session metadata), read by `baton-session-unread-p`. It is set to `t` by a `baton-session-status-changed-hook` handler when a non-running status arrives and the buffer is not visible, and cleared to `nil` by the global timer when the buffer becomes visible. `baton-session-unread-changed-hook` fires on both transitions.
 
 6. **The test isolation macro `baton-test-with-clean-state`** lives in `test/baton-test-helpers.el`. It rebinds all global state (sessions, counters, agents, hooks including `baton-session-unread-changed-hook`) with `let`. Always use it in tests to avoid cross-contamination.
 

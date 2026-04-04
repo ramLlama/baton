@@ -147,18 +147,20 @@ this setting."
 
 (defun baton--setup-hooks ()
   "Add baton notification hooks."
-  (add-hook 'baton-session-status-changed-hook  #'baton-notify--on-status-changed)
+  (add-hook 'baton-session-status-changed-hook  #'baton-notify--on-status-changed-mark-unread)
   (add-hook 'baton-session-created-hook         #'baton-notify--on-session-event)
   (add-hook 'baton-session-killed-hook          #'baton-notify--on-session-event)
   (add-hook 'baton-session-unread-changed-hook  #'baton-notify--on-unread-changed)
+  (baton-notify--start-global-timer)
   (baton-alert--setup))
 
 (defun baton--teardown-hooks ()
   "Remove baton notification hooks."
-  (remove-hook 'baton-session-status-changed-hook  #'baton-notify--on-status-changed)
+  (remove-hook 'baton-session-status-changed-hook  #'baton-notify--on-status-changed-mark-unread)
   (remove-hook 'baton-session-created-hook         #'baton-notify--on-session-event)
   (remove-hook 'baton-session-killed-hook          #'baton-notify--on-session-event)
   (remove-hook 'baton-session-unread-changed-hook  #'baton-notify--on-unread-changed)
+  (baton-notify--stop-global-timer)
   (setq baton-notify-function #'baton-notify--default))
 
 ;;; User Commands

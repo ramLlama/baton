@@ -60,6 +60,16 @@
 
 ;;; ─── :status-function watcher dispatch tests ────────────────────────────────
 
+(defun baton-test--quiet-metadata (buf-content)
+  "Return metadata plist for a session with BUF-CONTENT that has been quiet 10s."
+  (let ((hash (md5 buf-content)))
+    (list :last-output-hash hash
+          :last-output-time (- (float-time) 10.0)
+          :state nil
+          :unread nil
+          :notified-at nil
+          :watcher-timer nil)))
+
 (ert-deftest baton-test-process-status-function-waiting ()
   "A :status-function returning (waiting . reason) sets session to waiting."
   (baton-test-with-clean-state
@@ -74,14 +84,8 @@
           (progn
             (with-current-buffer buf (insert "some output"))
             (setf (baton--session-buffer s) buf)
-            (let ((hash (md5 "some output")))
-              (setf (baton--session-metadata s)
-                    (list :last-output-hash hash
-                          :last-output-time (- (float-time) 10.0)
-                          :current-hash hash
-                          :last-seen-hash hash
-                          :watcher-timer nil)))
-            (baton-process--watcher-tick s)
+            (setf (baton--session-metadata s) (baton-test--quiet-metadata "some output"))
+            (baton-process--state-tick s)
             (should (eq (baton--session-status s) 'waiting))
             (should (equal (baton--session-waiting-reason s) "fn-reason")))
         (kill-buffer buf)))))
@@ -100,14 +104,8 @@
           (progn
             (with-current-buffer buf (insert "busy"))
             (setf (baton--session-buffer s) buf)
-            (let ((hash (md5 "busy")))
-              (setf (baton--session-metadata s)
-                    (list :last-output-hash hash
-                          :last-output-time (- (float-time) 10.0)
-                          :current-hash hash
-                          :last-seen-hash hash
-                          :watcher-timer nil)))
-            (baton-process--watcher-tick s)
+            (setf (baton--session-metadata s) (baton-test--quiet-metadata "busy"))
+            (baton-process--state-tick s)
             (should (eq (baton--session-status s) 'running)))
         (kill-buffer buf)))))
 
@@ -125,15 +123,32 @@
           (progn
             (with-current-buffer buf (insert "quiet"))
             (setf (baton--session-buffer s) buf)
-            (let ((hash (md5 "quiet")))
-              (setf (baton--session-metadata s)
-                    (list :last-output-hash hash
-                          :last-output-time (- (float-time) 10.0)
-                          :current-hash hash
-                          :last-seen-hash hash
-                          :watcher-timer nil)))
-            (baton-process--watcher-tick s)
+            (setf (baton--session-metadata s) (baton-test--quiet-metadata "quiet"))
+            (baton-process--state-tick s)
             (should (eq (baton--session-status s) 'idle)))
+        (kill-buffer buf)))))
+
+(ert-deftest baton-test-process-state-tick-writes-state ()
+  "baton-process--state-tick writes :state metadata when status changes."
+  (baton-test-with-clean-state
+    (baton-define-agent
+     :name 'state-agent
+     :command "cmd"
+     :status-function-trigger :periodic
+     :status-function (lambda (_session) '(waiting . "prompt")))
+    (let* ((s (baton-session-create :agent 'state-agent :command "cmd" :directory "/tmp"))
+           (buf (get-buffer-create " *baton-test-state-tick*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf (insert "output"))
+            (setf (baton--session-buffer s) buf)
+            (setf (baton--session-metadata s) (baton-test--quiet-metadata "output"))
+            (baton-process--state-tick s)
+            (let ((state (plist-get (baton--session-metadata s) :state)))
+              (should state)
+              (should (eq (plist-get state :status) 'waiting))
+              (should (equal (plist-get state :reason) "prompt"))
+              (should (floatp (plist-get state :at)))))
         (kill-buffer buf)))))
 
 ;;; ─── baton-process env-functions tests ──────────────────────────────────────
@@ -222,7 +237,7 @@
       (should (equal "" (baton-process-session-tail s))))))
 
 (ert-deftest baton-test-on-event-trigger-skips-status-fn ()
-  "Watcher does not call :status-function for :on-event sessions."
+  "baton-process--state-tick does not call :status-function for :on-event sessions."
   (baton-test-with-clean-state
     (let ((called nil))
       (baton-define-agent
@@ -236,14 +251,8 @@
             (progn
               (with-current-buffer buf (insert "some output"))
               (setf (baton--session-buffer s) buf)
-              (let ((hash (md5 "some output")))
-                (setf (baton--session-metadata s)
-                      (list :last-output-hash hash
-                            :last-output-time (- (float-time) 10.0)
-                            :current-hash hash
-                            :last-seen-hash hash
-                            :watcher-timer nil)))
-              (baton-process--watcher-tick s)
+              (setf (baton--session-metadata s) (baton-test--quiet-metadata "some output"))
+              (baton-process--state-tick s)
               (should-not called)
               (should (eq (baton--session-status s) 'idle)))
           (kill-buffer buf))))))

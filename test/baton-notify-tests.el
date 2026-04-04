@@ -55,8 +55,7 @@
           (progn
             (baton-session-set-status s 'idle)
             (setf (baton--session-buffer s) buf)
-            (setf (baton--session-metadata s)
-                  (list :current-hash "changed" :last-seen-hash nil))
+            (setf (baton--session-metadata s) (list :unread t))
             (let ((str (baton-notify--modeline-string)))
               (should (string-match-p "1\\*" str))))
         (kill-buffer buf)))))
@@ -70,31 +69,12 @@
           (progn
             (baton-session-set-status s 'idle)
             (setf (baton--session-buffer s) buf)
-            (setf (baton--session-metadata s)
-                  (list :current-hash "same" :last-seen-hash "same"))
+            (setf (baton--session-metadata s) (list :unread nil))
             (let ((str (baton-notify--modeline-string)))
               (should-not (string-match-p "\\*" str))))
         (kill-buffer buf)))))
 
-;;; ─── baton-notify timer and callback tests ───────────────────────────────────
-
-(ert-deftest baton-test-notify-fires-on-waiting ()
-  "Transitioning to waiting schedules a notify timer."
-  (baton-test-with-clean-state
-    (let ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp")))
-      (baton-notify--on-status-changed s 'running 'waiting)
-      (should (timerp (plist-get (baton--session-metadata s) :idle-notify-timer)))
-      (baton-notify--cancel-idle-timer s))))
-
-(ert-deftest baton-test-notify-pending-callback-fires-on-waiting ()
-  "baton-notify--pending-notify-callback notifies when session is waiting."
-  (baton-test-with-clean-state
-    (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
-           notified-session
-           (baton-notify-function (lambda (sess) (setq notified-session sess))))
-      (baton-session-set-status s 'waiting "permission prompt")
-      (baton-notify--pending-notify-callback s)
-      (should (eq notified-session s)))))
+;;; ─── baton-notify status-change and notification tests ──────────────────────
 
 (ert-deftest baton-test-notify-unread-handler-no-longer-notifies ()
   "baton-notify--on-unread-changed does not call baton-notify-function directly."
@@ -106,70 +86,134 @@
       (baton-notify--on-unread-changed s)
       (should (null notified-session)))))
 
-(ert-deftest baton-test-notify-status-idle-schedules-timer ()
-  "Transitioning to idle schedules an :idle-notify-timer in session metadata."
+(ert-deftest baton-test-notify-status-change-marks-unread ()
+  "baton-notify--on-status-changed-mark-unread sets :unread when buffer not visible."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
-           (buf (get-buffer-create " *baton-test-idle-timer*")))
+           (buf (get-buffer-create " *baton-test-mark-unread*")))
       (unwind-protect
           (progn
             (setf (baton--session-buffer s) buf)
-            (setf (baton--session-metadata s)
-                  (list :current-hash "new" :last-seen-hash "old"))
-            (baton-notify--on-status-changed s 'running 'idle)
-            (should (timerp (plist-get (baton--session-metadata s) :idle-notify-timer)))
-            (baton-notify--cancel-idle-timer s))
+            (setf (baton--session-metadata s) (list :unread nil))
+            (baton-notify--on-status-changed-mark-unread s 'running 'waiting)
+            (should (plist-get (baton--session-metadata s) :unread)))
         (kill-buffer buf)))))
 
-(ert-deftest baton-test-notify-status-non-idle-cancels-timer ()
-  "Transitioning away from idle cancels any pending :idle-notify-timer."
+(ert-deftest baton-test-notify-status-change-running-no-unread ()
+  "baton-notify--on-status-changed-mark-unread does not set :unread for running."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
-           (buf (get-buffer-create " *baton-test-cancel-timer*")))
+           (buf (get-buffer-create " *baton-test-running-no-unread*")))
       (unwind-protect
           (progn
             (setf (baton--session-buffer s) buf)
-            (setf (baton--session-metadata s)
-                  (list :current-hash "new" :last-seen-hash "old"))
-            (baton-notify--on-status-changed s 'running 'idle)
-            (should (timerp (plist-get (baton--session-metadata s) :idle-notify-timer)))
-            (baton-notify--on-status-changed s 'idle 'running)
-            (should (null (plist-get (baton--session-metadata s) :idle-notify-timer))))
+            (setf (baton--session-metadata s) (list :unread nil))
+            (baton-notify--on-status-changed-mark-unread s 'idle 'running)
+            (should-not (plist-get (baton--session-metadata s) :unread)))
         (kill-buffer buf)))))
 
-(ert-deftest baton-test-notify-idle-timer-fires-when-unread ()
-  "The pending notify callback fires baton-notify-function when session is idle and unread."
+(ert-deftest baton-test-notify-maybe-notify-waiting ()
+  "baton-notify--maybe-notify fires for a waiting session."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
-           (buf (get-buffer-create " *baton-test-idle-fire*"))
+           notified-session
+           (baton-notify-function (lambda (sess) (setq notified-session sess))))
+      (baton-session-set-status s 'waiting "permission prompt")
+      (baton-notify--maybe-notify s)
+      (should (eq notified-session s)))))
+
+(ert-deftest baton-test-notify-maybe-notify-idle-unread ()
+  "baton-notify--maybe-notify fires for an idle session with unread output."
+  (baton-test-with-clean-state
+    (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
+           (buf (get-buffer-create " *baton-test-maybe-idle-unread*"))
            notified-session
            (baton-notify-function (lambda (sess) (setq notified-session sess))))
       (unwind-protect
           (progn
             (setf (baton--session-buffer s) buf)
-            (setf (baton--session-metadata s)
-                  (list :current-hash "new" :last-seen-hash "old"))
+            (setf (baton--session-metadata s) (list :unread t))
             (baton-session-set-status s 'idle)
-            (baton-notify--pending-notify-callback s)
+            (baton-notify--maybe-notify s)
             (should (eq notified-session s)))
         (kill-buffer buf)))))
 
-(ert-deftest baton-test-notify-idle-timer-skips-when-read ()
-  "The pending notify callback does not fire when idle output has been seen."
+(ert-deftest baton-test-notify-maybe-notify-idle-read ()
+  "baton-notify--maybe-notify does not fire for an idle session with no unread output."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
-           (buf (get-buffer-create " *baton-test-idle-skip*"))
            notified-session
            (baton-notify-function (lambda (sess) (setq notified-session sess))))
-      (unwind-protect
-          (progn
-            (setf (baton--session-buffer s) buf)
-            (setf (baton--session-metadata s)
-                  (list :current-hash "same" :last-seen-hash "same"))
-            (baton-session-set-status s 'idle)
-            (baton-notify--pending-notify-callback s)
-            (should (null notified-session)))
-        (kill-buffer buf)))))
+      (setf (baton--session-metadata s) (list :unread nil))
+      (baton-session-set-status s 'idle)
+      (baton-notify--maybe-notify s)
+      (should (null notified-session)))))
+
+(ert-deftest baton-test-notify-global-tick-fires-after-delay ()
+  "baton-notify--global-tick fires notification when baton-notify-delay has elapsed."
+  (baton-test-with-clean-state
+    (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
+           notified-session
+           (baton-notify-function (lambda (sess) (setq notified-session sess)))
+           (baton-notify-delay 5))
+      (baton-session-set-status s 'waiting "prompt")
+      (setf (baton--session-metadata s)
+            (list :state (list :status 'waiting :reason "prompt"
+                               :at (- (float-time) 10.0))
+                  :notified-at nil
+                  :unread nil))
+      (baton-notify--global-tick)
+      (should (eq notified-session s)))))
+
+(ert-deftest baton-test-notify-global-tick-skips-before-delay ()
+  "baton-notify--global-tick does not fire before baton-notify-delay elapses."
+  (baton-test-with-clean-state
+    (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
+           notified-session
+           (baton-notify-function (lambda (sess) (setq notified-session sess)))
+           (baton-notify-delay 5))
+      (baton-session-set-status s 'waiting "prompt")
+      (setf (baton--session-metadata s)
+            (list :state (list :status 'waiting :reason "prompt"
+                               :at (- (float-time) 0.1))
+                  :notified-at nil
+                  :unread nil))
+      (baton-notify--global-tick)
+      (should (null notified-session)))))
+
+(ert-deftest baton-test-notify-global-tick-skips-when-already-notified ()
+  "baton-notify--global-tick does not re-notify after :notified-at >= :state :at."
+  (baton-test-with-clean-state
+    (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
+           notify-count
+           (baton-notify-function (lambda (_sess) (cl-incf notify-count)))
+           (baton-notify-delay 0)
+           (state-at (- (float-time) 10.0)))
+      (setq notify-count 0)
+      (baton-session-set-status s 'waiting "prompt")
+      (setf (baton--session-metadata s)
+            (list :state (list :status 'waiting :reason "prompt" :at state-at)
+                  :notified-at (+ state-at 1.0)
+                  :unread nil))
+      (baton-notify--global-tick)
+      (should (= 0 notify-count)))))
+
+(ert-deftest baton-test-notify-global-tick-skips-stale-state ()
+  "baton-notify--global-tick skips notification when :state is stale (status diverged)."
+  (baton-test-with-clean-state
+    (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
+           notified-session
+           (baton-notify-function (lambda (sess) (setq notified-session sess)))
+           (baton-notify-delay 0))
+      ;; :state says waiting, but session is now running (e.g. user sent input)
+      (baton-session-set-status s 'running)
+      (setf (baton--session-metadata s)
+            (list :state (list :status 'waiting :reason "prompt"
+                               :at (- (float-time) 10.0))
+                  :notified-at nil
+                  :unread nil))
+      (baton-notify--global-tick)
+      (should (null notified-session)))))
 
 ;;; ─── baton-notify status buffer rendering tests ─────────────────────────────
 
@@ -238,48 +282,39 @@
 ;;; ─── error/other notification tests ─────────────────────────────────────────
 
 (ert-deftest baton-test-notify-error-notifies-when-unread ()
-  "An error session fires baton-notify-function only when it has unread output."
+  "baton-notify--maybe-notify fires for an error session with unread output."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
-           (buf (get-buffer-create " *baton-test-error-unread*"))
            notified-session
            (baton-notify-function (lambda (sess) (setq notified-session sess))))
-      (unwind-protect
-          (progn
-            (setf (baton--session-buffer s) buf)
-            ;; Unread: hashes differ
-            (setf (baton--session-metadata s)
-                  (list :current-hash "new" :last-seen-hash "old"))
-            (baton-session-set-status s 'error "crashed")
-            (baton-notify--pending-notify-callback s)
-            (should (eq notified-session s)))
-        (kill-buffer buf)))))
+      (setf (baton--session-metadata s) (list :unread t))
+      (baton-session-set-status s 'error "crashed")
+      (baton-notify--maybe-notify s)
+      (should (eq notified-session s)))))
 
 (ert-deftest baton-test-notify-error-skips-when-read ()
-  "An error session does not fire baton-notify-function when the buffer has been seen."
+  "baton-notify--maybe-notify does not fire for an error session without unread output."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
-           (buf (get-buffer-create " *baton-test-error-read*"))
            notified-session
            (baton-notify-function (lambda (sess) (setq notified-session sess))))
+      (setf (baton--session-metadata s) (list :unread nil))
+      (baton-session-set-status s 'error "crashed")
+      (baton-notify--maybe-notify s)
+      (should (null notified-session)))))
+
+(ert-deftest baton-test-notify-other-marks-unread ()
+  "Transitioning to `other' status marks the session unread when buffer not visible."
+  (baton-test-with-clean-state
+    (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
+           (buf (get-buffer-create " *baton-test-other-unread*")))
       (unwind-protect
           (progn
             (setf (baton--session-buffer s) buf)
-            ;; Read: hashes match
-            (setf (baton--session-metadata s)
-                  (list :current-hash "same" :last-seen-hash "same"))
-            (baton-session-set-status s 'error "crashed")
-            (baton-notify--pending-notify-callback s)
-            (should (null notified-session)))
+            (setf (baton--session-metadata s) (list :unread nil))
+            (baton-notify--on-status-changed-mark-unread s 'running 'other)
+            (should (plist-get (baton--session-metadata s) :unread)))
         (kill-buffer buf)))))
-
-(ert-deftest baton-test-notify-other-schedules-timer ()
-  "Transitioning to `other' status schedules a notify timer."
-  (baton-test-with-clean-state
-    (let ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp")))
-      (baton-notify--on-status-changed s 'running 'other)
-      (should (timerp (plist-get (baton--session-metadata s) :idle-notify-timer)))
-      (baton-notify--cancel-idle-timer s))))
 
 (provide 'baton-notify-tests)
 ;;; baton-notify-tests.el ends here

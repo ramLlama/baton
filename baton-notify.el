@@ -163,41 +163,76 @@ waiting or in error.  Markers are controlled by `baton-marker-waiting',
   "Refresh the modeline."
   (force-mode-line-update t))
 
-(defconst baton-notify--idle-delay 5
-  "Seconds a session must remain idle before an unread notification fires.")
+(defcustom baton-notify-delay 5
+  "Seconds to wait after a session needs attention before sending a notification."
+  :type 'number
+  :group 'baton)
 
-(defun baton-notify--cancel-idle-timer (session)
-  "Cancel any pending idle notification timer for SESSION."
-  (let ((meta (baton--session-metadata session)))
-    (when-let* ((timer (plist-get meta :idle-notify-timer)))
-      (cancel-timer timer)
-      (setf (baton--session-metadata session)
-            (plist-put meta :idle-notify-timer nil)))))
-
-(defun baton-notify--pending-notify-callback (session)
-  "Fire a notification for SESSION if still applicable after the idle delay.
-Notifies when status is `waiting', or `idle' with unread output.
-No-op if the session has returned to `running'."
-  (setf (baton--session-metadata session)
-        (plist-put (baton--session-metadata session) :idle-notify-timer nil))
+(defun baton-notify--maybe-notify (session)
+  "Fire `baton-notify-function' for SESSION if it needs attention.
+Notifies when status is `waiting', or non-running with unread output.
+Returns non-nil if the notification was fired."
   (let ((status (baton--session-status session)))
     (when (or (eq status 'waiting)
               (and (memq status '(error other idle))
                    (baton-session-unread-p session)))
-      (funcall baton-notify-function session))))
+      (funcall baton-notify-function session)
+      t)))
 
-(defun baton-notify--on-status-changed (session _old-status new-status)
-  "Handle SESSION status change from OLD-STATUS to NEW-STATUS."
-  (force-mode-line-update t)
-  (if (memq new-status '(waiting error other idle))
-      (progn
-        (baton-notify--cancel-idle-timer session)
+(defvar baton-notify--global-timer nil
+  "Timer that drives global notification polling and unread clearing.")
+
+(defun baton-notify--global-tick ()
+  "Global timer tick: clear unread for visible sessions, fire pending notifications."
+  (let ((now (float-time)))
+    (dolist (session (baton-session-list))
+      (let* ((buf (baton--session-buffer session))
+             (meta (baton--session-metadata session))
+             (state (plist-get meta :state))
+             (state-at (and state (plist-get state :at)))
+             (notified-at (plist-get meta :notified-at)))
+        ;; Clear unread when the buffer is visible
+        (when (and (plist-get meta :unread)
+                   buf (buffer-live-p buf)
+                   (get-buffer-window buf t))
+          (setf (baton--session-metadata session)
+                (plist-put (baton--session-metadata session) :unread nil))
+          (run-hook-with-args 'baton-session-unread-changed-hook session))
+        ;; Fire notification after baton-notify-delay seconds of stability.
+        ;; Guard: skip if :state is stale (live status has diverged, e.g. reset
+        ;; to running by user input before the delay elapsed).
+        (when (and state-at
+                   (eq (plist-get state :status) (baton--session-status session))
+                   (>= (- now state-at) baton-notify-delay)
+                   (or (null notified-at) (> state-at notified-at)))
+          (when (baton-notify--maybe-notify session)
+            (setf (baton--session-metadata session)
+                  (plist-put (baton--session-metadata session) :notified-at now)))))))
+  (force-mode-line-update t))
+
+(defun baton-notify--start-global-timer ()
+  "Start the global notification and unread tracking timer."
+  (unless baton-notify--global-timer
+    (setq baton-notify--global-timer
+          (run-with-timer 0.5 0.5 #'baton-notify--global-tick))))
+
+(defun baton-notify--stop-global-timer ()
+  "Stop the global notification and unread tracking timer."
+  (when baton-notify--global-timer
+    (cancel-timer baton-notify--global-timer)
+    (setq baton-notify--global-timer nil)))
+
+(defun baton-notify--on-status-changed-mark-unread (session _old-status new-status)
+  "Handle SESSION status change: mark unread if buffer not visible."
+  (when (memq new-status '(waiting idle error other))
+    (let* ((buf (baton--session-buffer session))
+           (meta (baton--session-metadata session)))
+      (when (and buf (buffer-live-p buf)
+                 (not (get-buffer-window buf t))
+                 (not (plist-get meta :unread)))
         (setf (baton--session-metadata session)
-              (plist-put (baton--session-metadata session) :idle-notify-timer
-                         (run-at-time baton-notify--idle-delay nil
-                                      #'baton-notify--pending-notify-callback
-                                      session))))
-    (baton-notify--cancel-idle-timer session))
+              (plist-put (baton--session-metadata session) :unread t))
+        (run-hook-with-args 'baton-session-unread-changed-hook session))))
   (baton-notify--refresh-list-buffer))
 
 (defun baton-notify--on-session-event (&rest _)

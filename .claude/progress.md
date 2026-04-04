@@ -4,7 +4,7 @@
 `~/.claude/plans/elegant-strolling-donut.md`
 
 ## Status
-Commits 1–2 (monet + baton process trigger) complete. Commits 3–4 (baton) not started.
+Commits 1–3 complete. Commit 4 (baton) not started.
 
 ---
 
@@ -36,6 +36,19 @@ Commits 1–2 (monet + baton process trigger) complete. Commits 3–4 (baton) no
 - Makefile already had `pre-commit: checkdoc test compile`; added `default: compile`, renamed `all` → `pre-commit`
 - Created `.git/hooks/pre-commit` calling `make pre-commit`
 - Committed: `build: add pre-commit target and git hook`
+
+### baton — Commit 3 (`:state` metadata + hook integration)
+- `baton-process-spawn`: added `:state nil` to metadata init
+- `baton-monet--set-state`: writes `:state (:status sym :reason str :at float)` + calls `baton-session-set-status`
+- `baton-monet--hook-status-fn`: reads `:state`, returns `(sym . reason)` plain symbols
+- `baton-monet--session-env-function`: injects `MONET_CTX_baton_session=<name>`
+- `baton-monet--claude-hook-handler`: dispatches UserPromptSubmit/Stop/Notification; skips on `:pending-diff`
+- `baton-monet--teardown`: deregisters handler, removes hook + keybinding, restores claude-code agent def
+- `baton-monet-setup`: now registers env-fn, hook handler, switches claude-code to `:on-event`
+- `baton.el`: calls `baton-monet--teardown` on `baton-mode` disable
+- Status-function contract standardized to plain symbols (`waiting`, `idle`, etc.) everywhere
+- `make test` now depends on `compile` to avoid stale `.elc` footgun
+- Committed: `feat(monet): add Claude Code hook integration + plain-symbol status API`
 
 ### baton — Commit 2 (status-fn API + `:status-function-trigger`)
 - **`baton-process-session-tail(session)`**: public fn; returns last 250 lines of

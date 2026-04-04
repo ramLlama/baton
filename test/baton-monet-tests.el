@@ -103,10 +103,11 @@ Even when the terminal output matches a different waiting pattern (e.g.
                     (list :pending-diff (lambda () t)
                           :last-output-hash hash
                           :last-output-time (- (float-time) 10.0)
-                          :current-hash hash
-                          :last-seen-hash hash
+                          :state nil
+                          :unread nil
+                          :notified-at nil
                           :watcher-timer nil)))
-            (baton-process--watcher-tick s)
+            (baton-process--state-tick s)
             (should (eq (baton--session-status s) 'waiting))
             (should (equal (baton--session-waiting-reason s) "diff review")))
         (kill-buffer buf)))))

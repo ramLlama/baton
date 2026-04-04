@@ -161,17 +161,8 @@ Fires `baton-session-killed-hook'."
   (mapc #'baton-session-kill (baton-session-list)))
 
 (defun baton-session-unread-p (session)
-  "Return t if SESSION has output the user has not yet seen.
-A session is unread when its buffer is not currently visible and its
-output hash has changed since the user last switched away from it."
-  (let* ((buf (baton--session-buffer session))
-         (meta (baton--session-metadata session))
-         (current (plist-get meta :current-hash))
-         (last-seen (plist-get meta :last-seen-hash)))
-    (and buf
-         (buffer-live-p buf)
-         (not (get-buffer-window buf t))
-         (not (equal current last-seen)))))
+  "Return t if SESSION has output the user has not yet seen."
+  (plist-get (baton--session-metadata session) :unread))
 
 (provide 'baton-session)
 ;;; baton-session.el ends here

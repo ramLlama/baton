@@ -9,7 +9,7 @@ The central data structure. A `cl-defstruct` with fields:
 - `status` -- symbol: `running`, `waiting`, `idle`, `error`, or `other`
 - `waiting-reason` -- string describing why the agent is waiting, in error, or in other status (e.g., "permission prompt")
 - `created-at`, `updated-at` -- `float-time` timestamps
-- `metadata` -- plist for internal state (`:watcher-timer`, `:last-output-hash`, `:last-output-time`, `:current-hash`, `:last-seen-hash`, `:state`). The `:state` field (used by `:on-event` agents) is a plist `(:status SYMBOL :reason STRING-OR-NIL :at FLOAT-TIME)` written by `baton-monet--set-state`.
+- `metadata` -- plist for internal state (`:watcher-timer`, `:last-output-hash`, `:last-output-time`, `:state`, `:unread`, `:notified-at`). The `:state` field is a plist `(:status SYMBOL :reason STRING-OR-NIL :at FLOAT-TIME)` written by `baton-process--tick-set-status` (for `:periodic` agents) and `baton-monet--set-state` (for `:on-event` agents). `:unread` is a boolean flag. `:notified-at` is a `float-time` timestamp of the last notification sent.
 
 ## Agent Registry (`baton-agents`)
 
@@ -40,11 +40,12 @@ When a session's process exits, the vterm buffer is killed and the watcher self-
 
 ## Unread Tracking
 
-Session metadata tracks two hashes:
-- `:current-hash` -- MD5 of last 250 lines, updated every watcher tick
-- `:last-seen-hash` -- hash saved while the buffer is visible in any window
+Unread state is stored as a boolean `:unread` flag in session metadata.
 
-`baton-session-unread-p` returns `t` when the buffer is not currently visible and `:current-hash ≠ :last-seen-hash`. This is purely computed — no stored boolean flag.
+- **Set to `t`**: by `baton-notify--on-status-changed-mark-unread` (on `baton-session-status-changed-hook`) when transitioning to `waiting`/`idle`/`error`/`other` and the buffer is not visible
+- **Set to `nil`**: by `baton-notify--global-tick` (0.5s global timer) when the buffer becomes visible in any window
+
+`baton-session-unread-p` reads the `:unread` flag from session metadata.
 
 ## Alert Backend Registry (`baton-alert--backends`)
 

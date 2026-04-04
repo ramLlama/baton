@@ -118,9 +118,9 @@ named \"*baton:<name>*\" and the session's buffer slot is updated."
       (setf (baton--session-metadata session)
             (list :last-output-time now
                   :last-output-hash ""
-                  :current-hash ""
-                  :last-seen-hash nil
-                  :state nil)))
+                  :state nil
+                  :unread nil
+                  :notified-at nil)))
     (baton-process--start-watcher session)
     buf))
 
@@ -202,21 +202,34 @@ watcher does not immediately re-derive the prior state."
       (buffer-substring-no-properties (point) (point-max)))))
 
 (defun baton-process--start-watcher (session)
-  "Start the output watcher timer for SESSION.
+  "Start the output watcher timer for SESSION if its agent uses :periodic trigger.
 Stores the timer in SESSION's metadata under :watcher-timer."
-  (let ((timer (run-with-timer baton-process--watcher-interval
-                               baton-process--watcher-interval
-                               #'baton-process--watcher-tick
-                               session)))
-    (setf (baton--session-metadata session)
-          (plist-put (baton--session-metadata session) :watcher-timer timer))))
+  (let* ((agent-sym (baton--session-agent session))
+         (agent-def (and (boundp 'baton-agents) (gethash agent-sym baton-agents)))
+         (trigger (and agent-def (plist-get agent-def :status-function-trigger))))
+    (when (eq trigger :periodic)
+      (let ((timer (run-with-timer baton-process--watcher-interval
+                                   baton-process--watcher-interval
+                                   #'baton-process--state-tick
+                                   session)))
+        (setf (baton--session-metadata session)
+              (plist-put (baton--session-metadata session) :watcher-timer timer))))))
 
-(defun baton-process--watcher-tick (session)
+(defun baton-process--tick-set-status (session status reason)
+  "Set SESSION status to STATUS with REASON, writing :state metadata if changed."
+  (let ((pre-updated-at (baton--session-updated-at session)))
+    (baton-session-set-status session status reason)
+    (when (> (baton--session-updated-at session) pre-updated-at)
+      (setf (baton--session-metadata session)
+            (plist-put (baton--session-metadata session)
+                       :state (list :status status :reason reason :at (float-time)))))))
+
+(defun baton-process--state-tick (session)
   "Observe SESSION's output and derive its current status.
 Cancels the timer if the buffer is no longer live.  State is computed
 fresh each tick: `running' if output changed, `waiting' if quiet and a
-waiting pattern matches, `idle' otherwise.  Tracks `:current-hash' and
-`:last-seen-hash' in session metadata for unread detection."
+waiting pattern matches, `idle' otherwise.  Only started for :periodic
+sessions; does not call the status function for :on-event sessions."
   (let ((buf (baton--session-buffer session)))
     (if (not (and buf (buffer-live-p buf)))
         ;; Buffer gone — stop watching
@@ -229,12 +242,7 @@ waiting pattern matches, `idle' otherwise.  Tracks `:current-hash' and
              (last-hash (or (plist-get meta :last-output-hash) ""))
              (last-time (or (plist-get meta :last-output-time) (float-time)))
              (now (float-time))
-             (hash-changed (not (equal current-hash last-hash)))
-             ;; Check unread state BEFORE updating :current-hash
-             (was-unread (baton-session-unread-p session)))
-        ;; Update :current-hash every tick (used by baton-session-unread-p)
-        (setf (baton--session-metadata session)
-              (plist-put (baton--session-metadata session) :current-hash current-hash))
+             (hash-changed (not (equal current-hash last-hash))))
         ;; Track when output last changed
         (when hash-changed
           (setf (baton--session-metadata session)
@@ -245,7 +253,7 @@ waiting pattern matches, `idle' otherwise.  Tracks `:current-hash' and
         ;; Derive status; baton-session-set-status is a no-op when nothing changed.
         (cond
          (hash-changed
-          (baton-session-set-status session 'running))
+          (baton-process--tick-set-status session 'running nil))
          ((>= (- now last-time) baton-process--quiet-threshold)
           (let* ((agent-sym (baton--session-agent session))
                  (agent-def (and (boundp 'baton-agents)
@@ -260,20 +268,11 @@ waiting pattern matches, `idle' otherwise.  Tracks `:current-hash' and
                              '(waiting . "diff review")
                            raw-result)))
             (pcase (and (consp result) (car result))
-              ('waiting (baton-session-set-status session 'waiting (cdr result)))
-              ('running (baton-session-set-status session 'running))
-              ('error   (baton-session-set-status session 'error   (cdr result)))
-              ('other   (baton-session-set-status session 'other   (cdr result)))
-              (_        (baton-session-set-status session 'idle))))))
-        ;; Mark session read while buffer is visible
-        (when (get-buffer-window buf t)
-          (setf (baton--session-metadata session)
-                (plist-put (baton--session-metadata session) :last-seen-hash current-hash)))
-        ;; Fire unread hook on read→unread transition
-        (when (and (baton-session-unread-p session) (not was-unread))
-          (run-hook-with-args 'baton-session-unread-changed-hook session))
-        ;; Keep modeline current (unread count can change without a status change)
-        (force-mode-line-update t)))))
+              ('waiting (baton-process--tick-set-status session 'waiting (cdr result)))
+              ('running (baton-process--tick-set-status session 'running nil))
+              ('error   (baton-process--tick-set-status session 'error   (cdr result)))
+              ('other   (baton-process--tick-set-status session 'other   (cdr result)))
+              (_        (baton-process--tick-set-status session 'idle    nil))))))))))
 
 (provide 'baton-process)
 ;;; baton-process.el ends here

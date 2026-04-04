@@ -147,31 +147,18 @@
       (should (null (baton-session-unread-p s))))))
 
 (ert-deftest baton-test-session-unread-p-hashes-differ ()
-  "baton-session-unread-p returns t when current-hash differs from last-seen-hash."
+  "baton-session-unread-p returns t when :unread is t in metadata."
   (baton-test-with-clean-state
-    (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
-           (buf (get-buffer-create " *baton-test-unread*")))
-      (unwind-protect
-          (progn
-            (setf (baton--session-buffer s) buf)
-            (setf (baton--session-metadata s)
-                  (list :current-hash "abc123" :last-seen-hash nil))
-            ;; Buffer not in any window → unread
-            (should (baton-session-unread-p s)))
-        (kill-buffer buf)))))
+    (let ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp")))
+      (setf (baton--session-metadata s) (list :unread t))
+      (should (baton-session-unread-p s)))))
 
 (ert-deftest baton-test-session-unread-p-hashes-equal ()
-  "baton-session-unread-p returns nil when current-hash equals last-seen-hash."
+  "baton-session-unread-p returns nil when :unread is nil in metadata."
   (baton-test-with-clean-state
-    (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
-           (buf (get-buffer-create " *baton-test-read*")))
-      (unwind-protect
-          (progn
-            (setf (baton--session-buffer s) buf)
-            (setf (baton--session-metadata s)
-                  (list :current-hash "abc123" :last-seen-hash "abc123"))
-            (should (null (baton-session-unread-p s))))
-        (kill-buffer buf)))))
+    (let ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp")))
+      (setf (baton--session-metadata s) (list :unread nil))
+      (should (null (baton-session-unread-p s))))))
 
 (provide 'baton-session-tests)
 ;;; baton-session-tests.el ends here
