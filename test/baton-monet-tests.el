@@ -15,37 +15,17 @@
 
 ;;; ─── baton-monet tests ──────────────────────────────────────────────────────
 
-(ert-deftest baton-test-monet-find-session-by-directory ()
-  "baton-monet--find-session matches a session by directory."
-  (baton-test-with-clean-state
-    (let ((s (baton-session-create :agent 'claude-code
-                                    :command "claude"
-                                    :directory "/my/project")))
-      (should (eq s (baton-monet--find-session "/my/project")))
-      (should (null (baton-monet--find-session "/other"))))))
-
-(ert-deftest baton-test-monet-find-session-prefers-claude-code ()
-  "baton-monet--find-session prefers claude-code when multiple sessions match."
-  (baton-test-with-clean-state
-    (let ((s-aider  (baton-session-create :agent 'aider
-                                           :command "aider"
-                                           :directory "/proj"))
-          (s-claude (baton-session-create :agent 'claude-code
-                                           :command "claude"
-                                           :directory "/proj")))
-      (should (eq s-claude (baton-monet--find-session "/proj"))))))
-
 (ert-deftest baton-test-monet-open-diff-defers ()
   "baton-monet--open-diff-handler stores :pending-diff and sets status to waiting."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code
                                      :command "claude"
                                      :directory "/proj"))
-           ;; Stub monet functions
-           (monet-session (list :directory "/proj"))
+           ;; Monet session whose key is the baton session name
+           (monet-session (list :key (baton--session-name s)))
            thunk-called)
-      (cl-letf (((symbol-function 'monet-session-directory)
-                 (lambda (_ms) "/proj"))
+      (cl-letf (((symbol-function 'monet-session-key)
+                 (lambda (ms) (plist-get ms :key)))
                 ((symbol-function 'monet-make-open-diff-handler)
                  (lambda (diff-fn) (lambda (_params _ms) (funcall diff-fn nil nil nil nil nil nil))))
                 ((symbol-function 'monet-ediff-tool)
@@ -58,6 +38,31 @@
         ;; A thunk was stored but NOT yet called
         (should (plist-get (baton--session-metadata s) :pending-diff))
         (should-not thunk-called)))))
+
+(ert-deftest baton-test-monet-open-diff-routes-by-key ()
+  "baton-monet--open-diff-handler routes to the correct session by monet session key.
+Two claude-code sessions share the same directory; only the one whose
+name matches the monet session key should receive the pending diff."
+  (baton-test-with-clean-state
+    (let* ((s1 (baton-session-create :agent 'claude-code
+                                      :command "claude"
+                                      :directory "/proj"))
+           (s2 (baton-session-create :agent 'claude-code
+                                      :command "claude"
+                                      :directory "/proj"))
+           ;; Monet session whose key matches s2's name
+           (monet-session (list :key (baton--session-name s2))))
+      (cl-letf (((symbol-function 'monet-session-key)
+                 (lambda (ms) (plist-get ms :key)))
+                ((symbol-function 'monet-make-open-diff-handler)
+                 (lambda (diff-fn) (lambda (_params _ms) (funcall diff-fn nil nil nil nil nil nil))))
+                ((symbol-function 'monet-ediff-tool)
+                 (lambda (_old _new _contents _accept _quit _sess) nil)))
+        (baton-monet--open-diff-handler nil monet-session)
+        ;; s2 gets the pending diff; s1 does not
+        (should (plist-get (baton--session-metadata s2) :pending-diff))
+        (should (null (plist-get (baton--session-metadata s1) :pending-diff)))
+        (should (eq (baton--session-status s2) 'waiting))))))
 
 (ert-deftest baton-test-monet-review-diff-invokes-thunk ()
   "baton-review-diff calls the stored thunk and clears :pending-diff."

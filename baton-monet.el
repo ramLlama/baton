@@ -24,6 +24,7 @@
 (defvar baton--current-session)
 (declare-function baton-add-env-function "baton" (agent fn))
 (declare-function baton-list--current-session "baton-notify" ())
+(declare-function monet-session-key "monet" (session))
 (declare-function monet-session-directory "monet" (session))
 (declare-function monet-make-open-diff-handler "monet" (diff-fn))
 (declare-function monet-make-tool "monet" (&rest plist))
@@ -35,26 +36,6 @@
 (declare-function monet-remove-claude-hook-handler "monet" (handler))
 (defvar monet-open-diff-tool-schema nil
   "MCP inputSchema for the openDiff tool (provided by monet).")
-
-;;; Session Lookup
-
-(defun baton-monet--find-session (directory)
-  "Find the baton session best matching DIRECTORY.
-Both DIRECTORY and stored session directories are normalized via
-`expand-file-name' and `file-name-as-directory' before comparison,
-so trailing slashes and relative components do not cause mismatches.
-Prefers agent `claude-code' when multiple sessions match.
-Returns nil if no match is found."
-  (let* ((dir (file-name-as-directory (expand-file-name directory)))
-         (matches (cl-remove-if-not
-                   (lambda (s)
-                     (and (baton--session-directory s)
-                          (equal (file-name-as-directory
-                                  (expand-file-name (baton--session-directory s)))
-                                 dir)))
-                   (baton-session-list))))
-    (or (cl-find 'claude-code matches :key #'baton--session-agent)
-        (car matches))))
 
 ;;; Hook Integration State
 
@@ -130,17 +111,17 @@ Safe to call even if monet is not loaded."
 
 (defun baton-monet--open-diff-handler (params monet-session)
   "Baton-aware openDiff handler.
-Finds the baton session for MONET-SESSION's directory, sets it to
-`waiting' with reason \"diff review\", and stores a thunk under
-`:pending-diff' in the session's metadata.  The diff is not opened
-immediately; call `baton-review-diff' when ready to review it.
-The baton session is reset to `running' when the user accepts or
-rejects the diff.
+Finds the baton session by MONET-SESSION's key (which equals the baton
+session name), sets it to `waiting' with reason \"diff review\", and
+stores a thunk under `:pending-diff' in the session's metadata.  The
+diff is not opened immediately; call `baton-review-diff' when ready to
+review it.  The baton session is reset to `running' when the user
+accepts or rejects the diff.
 PARAMS and MONET-SESSION are the standard MCP handler arguments.
 Returns a deferred response indicator so Claude Code waits for the
 user to accept or reject the diff before continuing."
-  (let* ((dir (monet-session-directory monet-session))
-         (baton-session (baton-monet--find-session dir))
+  (let* ((key (monet-session-key monet-session))
+         (baton-session (and key (baton-session-get key)))
          (reset (lambda (&rest _)
                   (when baton-session
                     (setf (baton--session-metadata baton-session)
