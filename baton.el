@@ -186,19 +186,33 @@ this setting."
   (message "baton: all sessions killed"))
 
 
+(defun baton--detect-directory ()
+  "Return the working directory for a new session.
+Prefers the current project root, then the current buffer's file directory,
+then `default-directory'."
+  (let ((project (project-current))
+        (file (buffer-file-name)))
+    (cond
+     (project (project-root project))
+     (file    (file-name-directory file))
+     (t       default-directory))))
+
 ;;;###autoload
 (defun baton-new (agent-name directory &optional name)
   "Spawn a new agent session.
 AGENT-NAME is a string naming the agent (e.g. \"claude-code\").
-DIRECTORY is the working directory for the session.
+DIRECTORY is the working directory for the session; auto-detected from the
+current buffer unless a double prefix argument \\[universal-argument] \
+\\[universal-argument] is given.
 NAME is an optional display name; prompted when called with \\[universal-argument].
 When `baton-default-agent' is set, AGENT-NAME defaults to that agent and no
 prompt is shown unless a prefix argument is given."
   (interactive
    (let* ((args (and (fboundp 'transient-args)
                      (transient-args 'baton)))
-          (agent-from-args (and args (transient-arg-value "--agent=" args)))
-          (name-from-args  (and args (transient-arg-value "--name="  args)))
+          (agent-from-args     (and args (transient-arg-value "--agent="     args)))
+          (name-from-args      (and args (transient-arg-value "--name="      args)))
+          (directory-from-args (and args (transient-arg-value "--directory=" args)))
           (agent-name (or agent-from-args
                           (and baton-default-agent
                                (not current-prefix-arg)
@@ -209,10 +223,13 @@ prompt is shown unless a prefix argument is given."
           (name (or name-from-args
                     (when current-prefix-arg
                       (let ((n (read-string "Session name (empty = auto): ")))
-                        (unless (string-empty-p n) n))))))
-     (list agent-name
-           (read-directory-name "Directory: " nil nil t)
-           name)))
+                        (unless (string-empty-p n) n)))))
+          ;; Transient -D > double-prefix prompt > auto-detect.
+          (directory (or directory-from-args
+                         (if (equal current-prefix-arg '(16))
+                             (read-directory-name "Directory: ")
+                           (baton--detect-directory)))))
+     (list agent-name directory name)))
   (let* ((agent (intern agent-name))
          (def (gethash agent baton-agents)))
     (unless def
@@ -281,6 +298,15 @@ prompt is shown unless a prefix argument is given."
   :reader (lambda (prompt _initial-input _history)
             (read-string prompt)))
 
+(transient-define-infix baton--directory-infix ()
+  "Directory to use for the next `baton-new' invocation (this dispatch only)."
+  :argument "--directory="
+  :class 'transient-option
+  :key "-D"
+  :description "Directory (this spawn)"
+  :reader (lambda (_prompt _initial-input _history)
+            (read-directory-name "Directory: ")))
+
 (transient-define-infix baton--default-agent-infix ()
   "Set the persistent default agent for `baton-new'."
   :class 'transient-lisp-variable
@@ -299,6 +325,7 @@ prompt is shown unless a prefix argument is given."
   [["Sessions"
     ("-a" baton--agent-infix)
     ("-n" baton--name-infix)
+    ("-D" baton--directory-infix)
     ("n" "New session"        baton-new)
     ("k" "Kill session"       baton-kill)
     ("K" "Kill all"           baton-kill-all)]
