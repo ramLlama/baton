@@ -223,7 +223,7 @@ Returns non-nil if the notification was fired."
     (setq baton-notify--global-timer nil)))
 
 (defun baton-notify--on-status-changed-mark-unread (session _old-status new-status)
-  "Handle SESSION status change: mark unread if buffer not visible."
+  "Handle SESSION status change to NEW-STATUS: mark unread if buffer not visible."
   (when (memq new-status '(waiting idle error other))
     (let* ((buf (baton--session-buffer session))
            (meta (baton--session-metadata session)))
@@ -424,7 +424,7 @@ Returns non-nil if the notification was fired."
               (if reason (format ": %s" reason) "")))))
 
 (defun baton-jump (&optional sessions)
-  "Jump to an agent vterm buffer via completing-read.
+  "Jump to an agent vterm buffer via `completing-read'.
 SESSIONS defaults to all sessions."
   (interactive)
   (let* ((all (or sessions (baton-session-list)))
@@ -442,7 +442,7 @@ SESSIONS defaults to all sessions."
         (message "baton: session buffer no longer exists")))))
 
 (defun baton-jump-to-waiting ()
-  "Jump to a waiting agent via completing-read (pre-filtered to waiting sessions)."
+  "Jump to a waiting agent via `completing-read', pre-filtered to waiting sessions."
   (interactive)
   (let ((waiting (baton-session-list 'waiting)))
     (if waiting

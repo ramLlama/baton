@@ -14,7 +14,7 @@
 ;;; ─── baton-session tests ────────────────────────────────────────────────────
 
 (ert-deftest baton-test-session-create-returns-struct ()
-  "baton-session-create returns a baton--session struct."
+  "`baton-session-create' returns a baton--session struct."
   (baton-test-with-clean-state
     (let ((s (baton-session-create :agent 'claude-code
                                     :command "claude"
@@ -52,7 +52,7 @@
       (should (equal (baton--session-name s2) "claude-2")))))
 
 (ert-deftest baton-test-session-create-explicit-name ()
-  "baton-session-create respects an explicit :name argument."
+  "`baton-session-create' respects an explicit :name argument."
   (baton-test-with-clean-state
     (let ((s (baton-session-create :agent 'claude-code
                                     :command "claude"
@@ -61,7 +61,7 @@
       (should (equal (baton--session-name s) "my-agent")))))
 
 (ert-deftest baton-test-session-create-fires-hook ()
-  "baton-session-create fires baton-session-created-hook with the session."
+  "`baton-session-create' fires baton-session-created-hook with the session."
   (baton-test-with-clean-state
     (let (hook-arg)
       (add-hook 'baton-session-created-hook (lambda (s) (setq hook-arg s)))
@@ -71,14 +71,14 @@
         (should (eq hook-arg s))))))
 
 (ert-deftest baton-test-session-list-all ()
-  "baton-session-list returns all sessions."
+  "`baton-session-list' returns all sessions."
   (baton-test-with-clean-state
     (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp")
     (baton-session-create :agent 'aider       :command "aider"  :directory "/tmp")
     (should (= 2 (length (baton-session-list))))))
 
 (ert-deftest baton-test-session-list-filter-by-status ()
-  "baton-session-list with a status argument filters correctly."
+  "`baton-session-list' with a status argument filters correctly."
   (baton-test-with-clean-state
     (let ((s1 (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
           (s2 (baton-session-create :agent 'aider       :command "aider"  :directory "/tmp")))
@@ -89,7 +89,7 @@
       (should (eq s2 (car (baton-session-list 'running)))))))
 
 (ert-deftest baton-test-session-set-status ()
-  "baton-session-set-status changes status and fires hook with old/new values."
+  "`baton-session-set-status' changes status and fires hook with old/new values."
   (baton-test-with-clean-state
     (let ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
           hook-session hook-old hook-new)
@@ -112,7 +112,7 @@
       (should (null (baton--session-waiting-reason s))))))
 
 (ert-deftest baton-test-session-find-by-directory ()
-  "baton-session-find-by-directory returns matching session."
+  "`baton-session-find-by-directory' returns matching session."
   (baton-test-with-clean-state
     (let ((s (baton-session-create :agent 'claude-code
                                     :command "claude"
@@ -121,7 +121,7 @@
       (should (null (baton-session-find-by-directory "/other"))))))
 
 (ert-deftest baton-test-session-kill-removes-from-registry ()
-  "baton-session-kill removes the session from the registry."
+  "`baton-session-kill' removes the session from the registry."
   (baton-test-with-clean-state
     (let ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp")))
       (baton-session-kill s)
@@ -129,7 +129,7 @@
       (should (= 0 (length (baton-session-list)))))))
 
 (ert-deftest baton-test-session-kill-fires-hook ()
-  "baton-session-kill fires baton-session-killed-hook with the session."
+  "`baton-session-kill' fires baton-session-killed-hook with the session."
   (baton-test-with-clean-state
     (let (hook-arg)
       (add-hook 'baton-session-killed-hook (lambda (s) (setq hook-arg s)))
@@ -140,21 +140,21 @@
 ;;; ─── baton-session unread tests ─────────────────────────────────────────────
 
 (ert-deftest baton-test-session-unread-p-no-buffer ()
-  "baton-session-unread-p returns nil when session has no live buffer."
+  "`baton-session-unread-p' returns nil when session has no live buffer."
   (baton-test-with-clean-state
     (let ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp")))
       ;; No buffer set — buffer field is nil
       (should (null (baton-session-unread-p s))))))
 
 (ert-deftest baton-test-session-unread-p-hashes-differ ()
-  "baton-session-unread-p returns t when :unread is t in metadata."
+  "`baton-session-unread-p' returns t when :unread is t in metadata."
   (baton-test-with-clean-state
     (let ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp")))
       (setf (baton--session-metadata s) (list :unread t))
       (should (baton-session-unread-p s)))))
 
 (ert-deftest baton-test-session-unread-p-hashes-equal ()
-  "baton-session-unread-p returns nil when :unread is nil in metadata."
+  "`baton-session-unread-p' returns nil when :unread is nil in metadata."
   (baton-test-with-clean-state
     (let ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp")))
       (setf (baton--session-metadata s) (list :unread nil))

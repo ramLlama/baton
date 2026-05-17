@@ -18,8 +18,7 @@ LOAD_PATHS := -L . \
               $(if $(MONET_DIR),-L $(MONET_DIR)) \
               $(if $(VTERM_DIR),-L $(VTERM_DIR))
 
-EL_FILES := baton-session.el baton-term.el baton-process.el baton-notify.el \
-            baton-alert.el baton-monet.el baton.el
+EL_FILES := $(filter-out baton-autoloads.el,$(wildcard *.el))
 
 MATCH ?=
 
@@ -30,13 +29,9 @@ default: compile
 clean:
 	rm -f *.elc baton-autoloads.el
 
+# baton-test-helpers.el must be first: it defines macros used by all other test files.
 TEST_FILES := test/baton-test-helpers.el \
-             test/baton-session-tests.el \
-             test/baton-term-tests.el \
-             test/baton-process-tests.el \
-             test/baton-notify-tests.el \
-             test/baton-monet-tests.el \
-             test/baton-alert-tests.el
+              $(filter-out test/baton-test-helpers.el,$(wildcard test/*.el))
 
 checkdoc:
 	for FILE in $(EL_FILES) $(TEST_FILES); do \
@@ -56,6 +51,7 @@ test: compile
 	  -l baton-process.el \
 	  -l baton-notify.el \
 	  -l baton-alert.el \
+	  $(if $(MONET_DIR),-l monet -l baton-monet.el) \
 	  -l baton.el \
 	  $(foreach f,$(TEST_FILES),-l $(f)) \
 	  $(if $(MATCH),--eval "(ert-run-tests-batch-and-exit \"$(MATCH)\")",-f ert-run-tests-batch-and-exit)

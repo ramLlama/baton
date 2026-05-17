@@ -16,7 +16,7 @@
 ;;; ─── Agent registry tests ────────────────────────────────────────────────────
 
 (ert-deftest baton-test-define-agent-stores ()
-  "baton-define-agent stores the definition at the symbol key."
+  "`baton-define-agent' stores the definition at the symbol key."
   (baton-test-with-clean-state
     (baton-define-agent :name 'my-agent :command "my-cmd"
                         :status-function-trigger :periodic)
@@ -129,7 +129,7 @@
         (kill-buffer buf)))))
 
 (ert-deftest baton-test-process-state-tick-writes-state ()
-  "baton-process--state-tick writes :state metadata when status changes."
+  "`baton-process--state-tick' writes :state metadata when status changes."
   (baton-test-with-clean-state
     (baton-define-agent
      :name 'state-agent
@@ -154,8 +154,8 @@
 ;;; ─── baton-process-spawn environment inheritance tests ──────────────────────
 
 (ert-deftest baton-test-spawn-inherits-buffer-local-process-environment ()
-  "process-environment is inherited from the calling buffer at spawn time.
-Covers the envrc.el/direnv scenario: envrc.el sets process-environment
+  "`process-environment' is inherited from the calling buffer at spawn time.
+Covers the envrc.el/direnv scenario: envrc.el sets `process-environment'
 buffer-locally in project buffers; baton-process-spawn must capture that value
 before switching to the new vterm buffer."
   (baton-test-with-clean-state
@@ -193,14 +193,14 @@ before switching to the new vterm buffer."
 ;;; ─── baton-process env-functions tests ──────────────────────────────────────
 
 (ert-deftest baton-test-env-functions-nil-by-default ()
-  "baton-define-agent without :env-functions stores nil."
+  "`baton-define-agent' without :env-functions stores nil."
   (baton-test-with-clean-state
     (baton-define-agent :name 'test-agent :command "cmd"
                         :status-function-trigger :periodic)
     (should (null (plist-get (gethash 'test-agent baton-agents) :env-functions)))))
 
 (ert-deftest baton-test-env-functions-add-appends ()
-  "baton-add-env-function appends; calling twice gives two entries in order."
+  "`baton-add-env-function' appends; calling twice gives two entries in order."
   (baton-test-with-clean-state
     (baton-define-agent :name 'test-agent :command "cmd"
                         :status-function-trigger :periodic)
@@ -214,7 +214,7 @@ before switching to the new vterm buffer."
         (should (eq (nth 1 fns) fn2))))))
 
 (ert-deftest baton-test-env-functions-add-idempotent ()
-  "baton-add-env-function is idempotent: adding the same fn twice gives one entry."
+  "`baton-add-env-function' is idempotent: adding the same fn twice gives one entry."
   (baton-test-with-clean-state
     (baton-define-agent :name 'test-agent :command "cmd"
                         :status-function-trigger :periodic)
@@ -236,7 +236,7 @@ before switching to the new vterm buffer."
       (should (equal extra-env '("A=1" "B=2" "C=3"))))))
 
 (ert-deftest baton-test-env-functions-nil-produces-no-extra-env ()
-  "nil :env-functions does not produce extra env vars."
+  "Nil :env-functions does not produce extra env vars."
   (baton-test-with-clean-state
     (baton-define-agent :name 'test-agent :command "cmd"
                         :status-function-trigger :periodic)
@@ -250,7 +250,7 @@ before switching to the new vterm buffer."
 ;;; ─── baton-process-session-tail tests ──────────────────────────────────────
 
 (ert-deftest baton-test-session-tail-live-buffer ()
-  "baton-process-session-tail returns buffer text when buffer is live."
+  "`baton-process-session-tail' returns buffer text when buffer is live."
   (baton-test-with-clean-state
     (baton-define-agent :name 'tail-agent :command "cmd"
                         :status-function-trigger :periodic)
@@ -264,7 +264,7 @@ before switching to the new vterm buffer."
         (kill-buffer buf)))))
 
 (ert-deftest baton-test-session-tail-dead-buffer ()
-  "baton-process-session-tail returns empty string when buffer is dead."
+  "`baton-process-session-tail' returns empty string when buffer is dead."
   (baton-test-with-clean-state
     (baton-define-agent :name 'tail-agent :command "cmd"
                         :status-function-trigger :periodic)
@@ -276,7 +276,7 @@ before switching to the new vterm buffer."
       (should (equal "" (baton-process-session-tail s))))))
 
 (ert-deftest baton-test-on-event-trigger-skips-status-fn ()
-  "baton-process--state-tick does not call :status-function for :on-event sessions."
+  "`baton-process--state-tick' does not call :status-function for :on-event sessions."
   (baton-test-with-clean-state
     (let ((called nil))
       (baton-define-agent

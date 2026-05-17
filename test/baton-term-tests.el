@@ -14,21 +14,21 @@
 ;;; ─── Input-command lookup tests ──────────────────────────────────────────────
 
 (ert-deftest baton-test-term-input-commands-vterm ()
-  "baton-term-input-commands for vterm returns a list containing vterm--self-insert."
+  "`baton-term-input-commands' for vterm returns a list containing vterm--self-insert."
   (should (memq 'vterm--self-insert (baton-term-input-commands 'vterm))))
 
 (ert-deftest baton-test-term-input-commands-eat ()
-  "baton-term-input-commands for eat returns a list containing eat-self-input."
+  "`baton-term-input-commands' for eat returns a list containing eat-self-input."
   (should (memq 'eat-self-input (baton-term-input-commands 'eat))))
 
 (ert-deftest baton-test-term-input-commands-ghostel ()
-  "baton-term-input-commands for ghostel returns a list containing ghostel--self-insert."
+  "`baton-term-input-commands' for ghostel returns a list containing ghostel--self-insert."
   (should (memq 'ghostel--self-insert (baton-term-input-commands 'ghostel))))
 
 ;;; ─── Pre/post ordering tests ─────────────────────────────────────────────────
 
 (ert-deftest baton-test-term-pre-fn-called-before-mode ()
-  "baton-term--activate calls :pre fn before the mode function."
+  "`baton-term--activate' calls :pre fn before the mode function."
   (let* ((call-order '())
          (buf (get-buffer-create " *baton-term-test-pre*")))
     (unwind-protect
@@ -46,7 +46,7 @@
       (kill-buffer buf))))
 
 (ert-deftest baton-test-term-post-fn-called-after-mode ()
-  "baton-term--activate calls :post fn after the mode function."
+  "`baton-term--activate' calls :post fn after the mode function."
   (let* ((call-order '())
          (buf (get-buffer-create " *baton-term-test-post*")))
     (unwind-protect
@@ -84,7 +84,7 @@
 ;;; ─── send-string test ────────────────────────────────────────────────────────
 
 (ert-deftest baton-test-term-send-string-eat ()
-  "baton-term--send-string for eat calls eat-term-send-string with eat-terminal."
+  "`baton-term--send-string' for eat calls eat-term-send-string with eat-terminal."
   (let* ((mock-terminal 'test-terminal)
          (sent-terminal nil)
          (sent-string nil)
@@ -105,7 +105,7 @@
 ;;; ─── send-key translation tests ──────────────────────────────────────────────
 
 (ert-deftest baton-test-term-send-key-eat-ret ()
-  "baton-term--send-key for eat translates \"RET\" to the carriage-return byte."
+  "`baton-term--send-key' for eat translates \"RET\" to the carriage-return byte."
   (let* ((sent nil)
          (buf (get-buffer-create " *baton-term-test-key-ret*")))
     (unwind-protect
@@ -119,7 +119,7 @@
       (kill-buffer buf))))
 
 (ert-deftest baton-test-term-send-key-ghostel-ctrl-c ()
-  "baton-term--send-key for ghostel translates \"C-c\" to (ghostel-send-key \"c\" \"ctrl\")."
+  "`baton-term--send-key' for ghostel translates the ctrl-c sequence to (ghostel-send-key \"c\" \"ctrl\")."
   (let* ((sent-key nil)
          (sent-mods nil)
          (buf (get-buffer-create " *baton-term-test-key-ghostel*")))

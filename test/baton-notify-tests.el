@@ -77,7 +77,7 @@
 ;;; ─── baton-notify status-change and notification tests ──────────────────────
 
 (ert-deftest baton-test-notify-unread-handler-no-longer-notifies ()
-  "baton-notify--on-unread-changed does not call baton-notify-function directly."
+  "`baton-notify--on-unread-changed' does not call baton-notify-function directly."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
            notified-session
@@ -87,7 +87,7 @@
       (should (null notified-session)))))
 
 (ert-deftest baton-test-notify-status-change-marks-unread ()
-  "baton-notify--on-status-changed-mark-unread sets :unread when buffer not visible."
+  "`baton-notify--on-status-changed-mark-unread' sets :unread when buffer not visible."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
            (buf (get-buffer-create " *baton-test-mark-unread*")))
@@ -100,7 +100,7 @@
         (kill-buffer buf)))))
 
 (ert-deftest baton-test-notify-status-change-running-no-unread ()
-  "baton-notify--on-status-changed-mark-unread does not set :unread for running."
+  "`baton-notify--on-status-changed-mark-unread' does not set :unread for running."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
            (buf (get-buffer-create " *baton-test-running-no-unread*")))
@@ -113,7 +113,7 @@
         (kill-buffer buf)))))
 
 (ert-deftest baton-test-notify-maybe-notify-waiting ()
-  "baton-notify--maybe-notify fires for a waiting session."
+  "`baton-notify--maybe-notify' fires for a waiting session."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
            notified-session
@@ -123,7 +123,7 @@
       (should (eq notified-session s)))))
 
 (ert-deftest baton-test-notify-maybe-notify-idle-unread ()
-  "baton-notify--maybe-notify fires for an idle session with unread output."
+  "`baton-notify--maybe-notify' fires for an idle session with unread output."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
            (buf (get-buffer-create " *baton-test-maybe-idle-unread*"))
@@ -139,7 +139,7 @@
         (kill-buffer buf)))))
 
 (ert-deftest baton-test-notify-maybe-notify-idle-read ()
-  "baton-notify--maybe-notify does not fire for an idle session with no unread output."
+  "`baton-notify--maybe-notify' does not fire for an idle session with no unread output."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
            notified-session
@@ -150,7 +150,7 @@
       (should (null notified-session)))))
 
 (ert-deftest baton-test-notify-global-tick-fires-after-delay ()
-  "baton-notify--global-tick fires notification when baton-notify-delay has elapsed."
+  "`baton-notify--global-tick' fires notification when baton-notify-delay has elapsed."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
            notified-session
@@ -166,7 +166,7 @@
       (should (eq notified-session s)))))
 
 (ert-deftest baton-test-notify-global-tick-skips-before-delay ()
-  "baton-notify--global-tick does not fire before baton-notify-delay elapses."
+  "`baton-notify--global-tick' does not fire before baton-notify-delay elapses."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
            notified-session
@@ -182,7 +182,7 @@
       (should (null notified-session)))))
 
 (ert-deftest baton-test-notify-global-tick-skips-when-already-notified ()
-  "baton-notify--global-tick does not re-notify after :notified-at >= :state :at."
+  "`baton-notify--global-tick' does not re-notify after :notified-at >= :state :at."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
            notify-count
@@ -199,7 +199,7 @@
       (should (= 0 notify-count)))))
 
 (ert-deftest baton-test-notify-global-tick-skips-stale-state ()
-  "baton-notify--global-tick skips notification when :state is stale (status diverged)."
+  "`baton-notify--global-tick' skips notification when :state is stale (status diverged)."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
            notified-session
@@ -251,7 +251,7 @@
         (should-not (string-match-p "\\*" (aref cols 1)))))))
 
 (ert-deftest baton-test-status-buffer-sorted ()
-  "baton-notify--list-entries returns sessions sorted by created-at."
+  "`baton-notify--list-entries' returns sessions sorted by created-at."
   (baton-test-with-clean-state
     (let ((s1 (baton-session-create :agent 'claude-code :command "claude" :directory "/a"))
           (s2 (baton-session-create :agent 'aider       :command "aider"  :directory "/b")))
@@ -265,7 +265,7 @@
         (should (equal (baton--session-name s2) (car (nth 1 entries))))))))
 
 (ert-deftest baton-test-status-buffer-mark-and-kill ()
-  "baton-list-execute kills sessions flagged in baton--list-marks."
+  "`baton-list-execute' kills sessions flagged in baton--list-marks."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
            (id (baton--session-name s))
@@ -282,7 +282,7 @@
 ;;; ─── error/other notification tests ─────────────────────────────────────────
 
 (ert-deftest baton-test-notify-error-notifies-when-unread ()
-  "baton-notify--maybe-notify fires for an error session with unread output."
+  "`baton-notify--maybe-notify' fires for an error session with unread output."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
            notified-session
@@ -293,7 +293,7 @@
       (should (eq notified-session s)))))
 
 (ert-deftest baton-test-notify-error-skips-when-read ()
-  "baton-notify--maybe-notify does not fire for an error session without unread output."
+  "`baton-notify--maybe-notify' does not fire for an error session without unread output."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code :command "claude" :directory "/tmp"))
            notified-session

@@ -16,7 +16,7 @@
 ;;; ─── baton-monet tests ──────────────────────────────────────────────────────
 
 (ert-deftest baton-test-monet-open-diff-defers ()
-  "baton-monet--open-diff-handler stores :pending-diff and sets status to waiting."
+  "`baton-monet--open-diff-handler' stores :pending-diff and sets status to waiting."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code
                                      :command "claude"
@@ -40,9 +40,9 @@
         (should-not thunk-called)))))
 
 (ert-deftest baton-test-monet-open-diff-routes-by-key ()
-  "baton-monet--open-diff-handler routes to the correct session by monet session key.
-Two claude-code sessions share the same directory; only the one whose
-name matches the monet session key should receive the pending diff."
+  "`baton-monet--open-diff-handler' routes to the correct session by monet key.
+Two claude-code sessions share the same directory; only the one whose name
+matches the monet session key should receive the pending diff."
   (baton-test-with-clean-state
     (let* ((s1 (baton-session-create :agent 'claude-code
                                       :command "claude"
@@ -65,7 +65,7 @@ name matches the monet session key should receive the pending diff."
         (should (eq (baton--session-status s2) 'waiting))))))
 
 (ert-deftest baton-test-monet-review-diff-invokes-thunk ()
-  "baton-review-diff calls the stored thunk and clears :pending-diff."
+  "`baton-review-diff' calls the stored thunk and clears :pending-diff."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code
                                      :command "claude"
@@ -118,7 +118,7 @@ Even when the terminal output matches a different waiting pattern (e.g.
         (kill-buffer buf)))))
 
 (ert-deftest baton-test-monet-review-bar-activates-on-diff-review ()
-  "baton-monet--update-review-bar activates mode-line bar and review mode."
+  "`baton-monet--update-review-bar' activates mode-line bar and review mode."
   (baton-test-with-clean-state
     (let* ((s (baton-session-create :agent 'claude-code
                                      :command "claude"
@@ -143,7 +143,7 @@ Even when the terminal output matches a different waiting pattern (e.g.
         (kill-buffer buf)))))
 
 (ert-deftest baton-test-monet-setup-enables-baton-set ()
-  "baton-monet-setup registers openDiff in :baton set and enables it."
+  "`baton-monet-setup' registers openDiff in :baton set and enables it."
   (skip-unless (featurep 'monet))
   (baton-test-with-clean-state
     (baton-define-agent :name 'claude-code :command "claude"
@@ -158,7 +158,7 @@ Even when the terminal output matches a different waiting pattern (e.g.
 ;;; ─── baton-monet--set-state tests ───────────────────────────────────────────
 
 (ert-deftest baton-test-monet-set-state-writes-metadata ()
-  "baton-monet--set-state writes :state plist into session metadata."
+  "`baton-monet--set-state' writes :state plist into session metadata."
   (baton-test-with-clean-state
     (let ((s (baton-session-create :agent 'claude-code
                                     :command "claude"
@@ -171,7 +171,7 @@ Even when the terminal output matches a different waiting pattern (e.g.
         (should (floatp (plist-get state :at)))))))
 
 (ert-deftest baton-test-monet-set-state-applies-status ()
-  "baton-monet--set-state updates the session's status field."
+  "`baton-monet--set-state' updates the session's status field."
   (baton-test-with-clean-state
     (let ((s (baton-session-create :agent 'claude-code
                                     :command "claude"
@@ -180,7 +180,7 @@ Even when the terminal output matches a different waiting pattern (e.g.
       (should (eq (baton--session-status s) 'idle)))))
 
 (ert-deftest baton-test-monet-hook-status-fn-reads-state ()
-  "baton-monet--hook-status-fn returns (status . reason) from :state metadata."
+  "`baton-monet--hook-status-fn' returns (status . reason) from :state metadata."
   (baton-test-with-clean-state
     (let ((s (baton-session-create :agent 'claude-code
                                     :command "claude"
@@ -190,7 +190,7 @@ Even when the terminal output matches a different waiting pattern (e.g.
       (should (equal (baton-monet--hook-status-fn s) '(waiting . "input prompt"))))))
 
 (ert-deftest baton-test-monet-hook-status-fn-nil-when-no-state ()
-  "baton-monet--hook-status-fn returns nil when :state is nil."
+  "`baton-monet--hook-status-fn' returns nil when :state is nil."
   (baton-test-with-clean-state
     (let ((s (baton-session-create :agent 'claude-code
                                     :command "claude"
@@ -272,14 +272,14 @@ Even when the terminal output matches a different waiting pattern (e.g.
 ;;; ─── baton-monet--session-env-function tests ────────────────────────────────
 
 (ert-deftest baton-test-monet-session-env-function ()
-  "baton-monet--session-env-function returns MONET_CTX_baton_session env var."
+  "`baton-monet--session-env-function' returns MONET_CTX_baton_session env var."
   (should (equal (baton-monet--session-env-function "claude-1" "/proj")
                  '("MONET_CTX_baton_session=claude-1"))))
 
 ;;; ─── baton-monet-setup / baton-monet--teardown tests ────────────────────────
 
 (ert-deftest baton-test-monet-setup-switches-claude-to-on-event ()
-  "baton-monet-setup switches claude-code from :periodic to :on-event trigger."
+  "`baton-monet-setup' switches claude-code from :periodic to :on-event trigger."
   (skip-unless (featurep 'monet))
   (baton-test-with-clean-state
     (let ((original-fn (lambda (_s) nil)))
@@ -300,7 +300,7 @@ Even when the terminal output matches a different waiting pattern (e.g.
         (should (eq baton-monet--saved-claude-status-fn original-fn))))))
 
 (ert-deftest baton-test-monet-teardown-restores-claude ()
-  "baton-monet--teardown restores claude-code's original trigger and status-fn."
+  "`baton-monet--teardown' restores claude-code's original trigger and status-fn."
   (skip-unless (featurep 'monet))
   (baton-test-with-clean-state
     (let ((original-fn (lambda (_s) nil)))
