@@ -2,7 +2,7 @@
 
 ;; Author: Ram Raghunathan
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "30.1") (vterm) (transient) (inheritenv))
+;; Package-Requires: ((emacs "30.1") (transient) (inheritenv))
 ;; Keywords: tools, ai
 ;; URL: https://github.com/ramraghunathan/baton
 
@@ -10,7 +10,9 @@
 ;; Baton is an Emacs package for managing multiple AI coding agents (Claude Code,
 ;; Aider, Codex CLI, Gemini CLI, etc.) from a unified interface.
 ;;
-;; Agents run in vterm terminal buffers.  Baton monitors their output for
+;; Agents run in terminal buffers (eat by default; vterm and ghostel are also
+;; supported — install whichever backend you prefer and set
+;; `baton-terminal-backend' accordingly).  Baton monitors their output for
 ;; patterns that signal "needs attention" (prompts, permission requests, etc.)
 ;; and surfaces that status via a modeline badge, a status buffer, and
 ;; optional OS notifications.
@@ -121,14 +123,6 @@ AGENT is a symbol key in `baton-agents'."
   "Manage multiple AI coding agents from Emacs."
   :group 'external
   :prefix "baton-")
-
-(defcustom baton-term-name "xterm-256color"
-  "TERM environment variable set in baton vterm buffers.
-\"xterm-256color\" is the safe default; agents detect 24-bit color
-via COLORTERM=truecolor (inherited from Emacs).  \"xterm-direct\"
-uses colon-separated RGB codes that libvterm does not render."
-  :type 'string
-  :group 'baton)
 
 (defcustom baton-default-agent nil
   "Default agent used by `baton-new' when no prefix argument is given.

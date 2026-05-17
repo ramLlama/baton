@@ -1,31 +1,22 @@
-;;; baton-process.el --- vterm spawning, output watching, input sending  -*- lexical-binding: t -*-
+;;; baton-process.el --- Terminal spawning, output watching, input sending  -*- lexical-binding: t -*-
 
 ;; Author: Ram Raghunathan
 ;; Keywords: tools, ai
 
 ;;; Commentary:
-;; Handles spawning vterm processes for baton sessions, watching their output
+;; Handles spawning terminal processes for baton sessions, watching their output
 ;; for status transitions (running -> waiting -> idle), and sending input.
 ;;
-;; Pattern matching functions are pure and have no vterm dependency,
-;; making them fully unit-testable.  vterm-dependent functions skip gracefully
-;; when vterm is not available.
+;; Pattern matching functions are pure and have no terminal dependency,
+;; making them fully unit-testable.
 
 ;;; Code:
 (require 'cl-lib)
 (require 'inheritenv)
 (require 'baton-session)
+(require 'baton-term)
 
-(defvar vterm-shell)
-(defvar vterm-term-environment-variable)
-(defvar vterm-buffer-name-string)
-(defvar vterm--redraw-immediately)
-(defvar baton-term-name)
 (defvar baton-agents)
-
-(declare-function vterm-mode          "vterm" ())
-(declare-function vterm-send-string   "vterm" (string &optional paste-p))
-(declare-function vterm-send-key      "vterm" (key &optional shift meta ctrl))
 
 ;;; Status Function Utilities (pure, no vterm dependency)
 
@@ -52,18 +43,14 @@ the first matching REGEXP, or nil if none match."
 ;;; Buffer-local session reference
 
 (defvar-local baton--current-session nil
-  "The `baton--session' associated with this vterm buffer.")
+  "The `baton--session' associated with this terminal buffer.")
 
-;;; vterm Spawning
+;;; Terminal Spawning
 
 (defun baton-process-spawn (session)
-  "Spawn a vterm buffer for SESSION and start the output watcher.
-Requires the `vterm' feature.  The session command is launched directly
-as the vterm shell (no interactive shell prompt).  The vterm buffer is
-named \"*baton:<name>*\" and the session's buffer slot is updated."
-  (unless (featurep 'vterm)
-    (error "baton-process-spawn requires vterm"))
-  (require 'vterm)
+  "Spawn a terminal buffer for SESSION and start the output watcher.
+The session command is launched in the configured terminal backend.
+The buffer is named \"*baton:<name>*\" and the session's buffer slot is updated."
   (let* ((dir (or (baton--session-directory session) default-directory))
          (command (baton--session-command session))
          (buf-name (format "*baton:%s*" (baton--session-name session)))
@@ -74,49 +61,24 @@ named \"*baton:<name>*\" and the session's buffer slot is updated."
                       (apply #'append
                              (mapcar (lambda (fn)
                                        (funcall fn (baton--session-name session) dir))
-                                     env-fns))))
-         ;; vterm-mode reads these dynamic vars during init; TERM must be
-         ;; set before vterm-shell so the pty is configured before the
-         ;; command launches.
-         (vterm-term-environment-variable baton-term-name)
-         (vterm-shell command))
-    ;; inheritenv must wrap with-current-buffer so it captures the calling
-    ;; buffer's process-environment (set by envrc.el/direnv) before the
-    ;; buffer switch discards it.  extra-env is prepended inside inheritenv
-    ;; so both sources are visible to vterm-mode when it spawns the process.
+                                     env-fns)))))
+    ;; inheritenv must wrap baton-term-spawn-in-buffer so it captures the calling
+    ;; buffer's process-environment (set by envrc.el/direnv) before the buffer
+    ;; switch discards it.  extra-env is prepended inside inheritenv so both
+    ;; sources are visible to the backend when it spawns the process.
     (inheritenv
      (when extra-env
        (setq process-environment (append extra-env process-environment)))
+     (baton-term-spawn-in-buffer buf dir command)
      (with-current-buffer buf
-       (let ((default-directory (file-name-as-directory dir)))
-         ;; vterm-mode must run while the buffer is in a real window so the
-         ;; PTY gets the correct terminal size (TIOCGWINSZ).  Deleting the
-         ;; window afterwards resizes the PTY to 0; if the agent process
-         ;; queries the terminal size before the window reappears it will
-         ;; see degenerate dimensions and may disable its TUI/colors.
-         ;; save-selected-window keeps the buffer in a visible window
-         ;; without clobbering the user's selection; baton-new's
-         ;; pop-to-buffer then switches focus to the buffer.
-         (save-selected-window
-           (pop-to-buffer buf)
-           (vterm-mode)))
-      (setq-local baton--current-session session)
-      ;; Anchor dired (C-x d) and other directory-sensitive commands to the
-      ;; session's working directory, not Emacs's global default-directory.
-      (setq-local default-directory (file-name-as-directory dir))
-      ;; Prevent vterm from overriding our buffer name with a process title.
-      (setq-local vterm-buffer-name-string nil)
-      ;; Let vterm manage the cursor entirely; without this Emacs renders its
-      ;; own cursor at buffer position 0 while vterm's overlay cursor is
-      ;; elsewhere, making it appear as if there is no cursor.
-      (setq-local cursor-type nil)
-      (setq-local cursor-in-non-selected-windows nil)
-      ;; Batch redraws to reduce flicker (matches claude-code's approach).
-      (setq-local vterm--redraw-immediately nil)
-      ;; Reset to running when the user types
-      (add-hook 'pre-command-hook #'baton-process--on-input nil t)
-      ;; Remove session from registry if the buffer is killed externally
-      (add-hook 'kill-buffer-hook #'baton-process--on-buffer-killed nil t)))
+       (setq-local baton--current-session session)
+       ;; Anchor dired (C-x d) and other directory-sensitive commands to the
+       ;; session's working directory, not Emacs's global default-directory.
+       (setq-local default-directory (file-name-as-directory dir))
+       ;; Reset to running when the user types
+       (add-hook 'pre-command-hook #'baton-process--on-input nil t)
+       ;; Remove session from registry if the buffer is killed externally
+       (add-hook 'kill-buffer-hook #'baton-process--on-buffer-killed nil t)))
     (setf (baton--session-buffer session) buf)
     ;; Initialize watcher metadata
     (let ((now (float-time)))
@@ -130,27 +92,25 @@ named \"*baton:<name>*\" and the session's buffer slot is updated."
     buf))
 
 (defun baton-process-send-input (session string)
-  "Send STRING to SESSION's vterm buffer and reset status to running."
+  "Send STRING to SESSION's terminal buffer and reset status to running."
   (when-let* ((buf (baton--session-buffer session)))
     (when (buffer-live-p buf)
       (baton-process--reset-to-running session)
-      (with-current-buffer buf
-        (vterm-send-string string)))))
+      (baton-term--send-string baton-terminal-backend buf string))))
 
 (defun baton-process-send-key (session key)
-  "Send KEY (a string like \"RET\") to SESSION's vterm buffer.
+  "Send KEY (a string like \"RET\") to SESSION's terminal buffer.
 Resets session status to running."
   (when-let* ((buf (baton--session-buffer session)))
     (when (buffer-live-p buf)
       (baton-process--reset-to-running session)
-      (with-current-buffer buf
-        (vterm-send-key key)))))
+      (baton-term--send-key baton-terminal-backend buf key))))
 
 ;;; Input Detection
 
 (defun baton-process--on-buffer-killed ()
-  "Handle external kill of a session's vterm buffer.
-Called from `kill-buffer-hook' in the vterm buffer.  Cancels the watcher
+  "Handle external kill of a session's terminal buffer.
+Called from `kill-buffer-hook' in the terminal buffer.  Cancels the watcher
 timer and removes the session from the registry without trying to kill
 the buffer again (it is already being killed)."
   (when baton--current-session
@@ -168,20 +128,13 @@ the buffer again (it is already being killed)."
   (unless (eq (baton--session-status session) 'running)
     (baton-session-set-status session 'running)))
 
-(defconst baton-process--input-commands
-  '(vterm--self-insert vterm-send-key vterm-send-return vterm-send-string
-    vterm-send-backspace vterm-send-tab vterm-send-up vterm-send-down
-    vterm-send-left vterm-send-right vterm-send-ctrl-c vterm-send-ctrl-d
-    vterm-send-ctrl-z vterm-send-escape vterm-send-meta-backspace)
-  "vterm commands that count as user input for status-reset purposes.")
-
 (defun baton-process--on-input ()
-  "Reset session to `running' when the user sends input to the vterm.
+  "Reset session to `running' when the user sends input to the terminal.
 Handles any non-running session.  Also resets the quiet-period clock so the
 watcher does not immediately re-derive the prior state."
   (when (and baton--current-session
              (not (eq (baton--session-status baton--current-session) 'running))
-             (memq this-command baton-process--input-commands))
+             (memq this-command (baton-term-input-commands baton-terminal-backend)))
     (baton-session-set-status baton--current-session 'running)
     (setf (baton--session-metadata baton--current-session)
           (plist-put (baton--session-metadata baton--current-session)

@@ -18,7 +18,7 @@ LOAD_PATHS := -L . \
               $(if $(MONET_DIR),-L $(MONET_DIR)) \
               $(if $(VTERM_DIR),-L $(VTERM_DIR))
 
-EL_FILES := baton-session.el baton-process.el baton-notify.el \
+EL_FILES := baton-session.el baton-term.el baton-process.el baton-notify.el \
             baton-alert.el baton-monet.el baton.el
 
 MATCH ?=
@@ -32,6 +32,7 @@ clean:
 
 TEST_FILES := test/baton-test-helpers.el \
              test/baton-session-tests.el \
+             test/baton-term-tests.el \
              test/baton-process-tests.el \
              test/baton-notify-tests.el \
              test/baton-monet-tests.el \
@@ -51,6 +52,7 @@ test: compile
 	  --eval "(package-initialize)" \
 	  -l ert \
 	  -l baton-session.el \
+	  -l baton-term.el \
 	  -l baton-process.el \
 	  -l baton-notify.el \
 	  -l baton-alert.el \

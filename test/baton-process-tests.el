@@ -174,19 +174,17 @@ before switching to the new vterm buffer."
               (setq-local process-environment
                           (cons "BATON_TEST_DIRENV_VAR=from-envrc"
                                 process-environment)))
-            ;; Mock vterm and its guard so the test runs without a real terminal.
-            (cl-letf (((symbol-function 'featurep)
-                       (lambda (feat &optional sub)
-                         (if (eq feat 'vterm) t (featurep feat sub))))
-                      ((symbol-function 'require)
+            ;; Mock vterm so the test runs without a real terminal.
+            (cl-letf (((symbol-function 'require)
                        (lambda (feat &rest args)
                          (unless (eq feat 'vterm) (apply #'require feat args))))
                       ((symbol-function 'vterm-mode)
                        (lambda () (setq captured-env process-environment)))
                       ((symbol-function 'pop-to-buffer) #'ignore)
                       ((symbol-function 'baton-process--start-watcher) #'ignore))
-              (with-current-buffer caller-buf
-                (baton-process-spawn session))))
+              (let ((baton-terminal-backend 'vterm))
+                (with-current-buffer caller-buf
+                  (baton-process-spawn session)))))
         (kill-buffer caller-buf)
         (when-let* ((buf (baton--session-buffer session)))
           (when (buffer-live-p buf) (kill-buffer buf))))
