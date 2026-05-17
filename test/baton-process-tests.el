@@ -151,6 +151,47 @@
               (should (floatp (plist-get state :at)))))
         (kill-buffer buf)))))
 
+;;; ─── baton-process-spawn environment inheritance tests ──────────────────────
+
+(ert-deftest baton-test-spawn-inherits-buffer-local-process-environment ()
+  "process-environment is inherited from the calling buffer at spawn time.
+Covers the envrc.el/direnv scenario: envrc.el sets process-environment
+buffer-locally in project buffers; baton-process-spawn must capture that value
+before switching to the new vterm buffer."
+  (baton-test-with-clean-state
+    (baton-define-agent :name 'spawn-env-agent :command "true"
+                        :status-function-trigger :periodic)
+    (let* ((captured-env nil)
+           (session (baton-session-create :agent 'spawn-env-agent
+                                          :command "true"
+                                          :directory "/tmp"))
+           ;; Simulates a direnv-managed project buffer where envrc.el has
+           ;; injected vars into the buffer-local process-environment.
+           (caller-buf (get-buffer-create " *baton-test-envrc-caller*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer caller-buf
+              (setq-local process-environment
+                          (cons "BATON_TEST_DIRENV_VAR=from-envrc"
+                                process-environment)))
+            ;; Mock vterm and its guard so the test runs without a real terminal.
+            (cl-letf (((symbol-function 'featurep)
+                       (lambda (feat &optional sub)
+                         (if (eq feat 'vterm) t (featurep feat sub))))
+                      ((symbol-function 'require)
+                       (lambda (feat &rest args)
+                         (unless (eq feat 'vterm) (apply #'require feat args))))
+                      ((symbol-function 'vterm-mode)
+                       (lambda () (setq captured-env process-environment)))
+                      ((symbol-function 'pop-to-buffer) #'ignore)
+                      ((symbol-function 'baton-process--start-watcher) #'ignore))
+              (with-current-buffer caller-buf
+                (baton-process-spawn session))))
+        (kill-buffer caller-buf)
+        (when-let* ((buf (baton--session-buffer session)))
+          (when (buffer-live-p buf) (kill-buffer buf))))
+      (should (member "BATON_TEST_DIRENV_VAR=from-envrc" captured-env)))))
+
 ;;; ─── baton-process env-functions tests ──────────────────────────────────────
 
 (ert-deftest baton-test-env-functions-nil-by-default ()

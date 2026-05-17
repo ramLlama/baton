@@ -21,6 +21,7 @@
 
 ;;; Code:
 (require 'cl-lib)
+(require 'inheritenv)
 (require 'baton-session)
 (require 'baton-notify)
 
@@ -134,7 +135,7 @@ Called automatically by `baton-mode'.  Safe to call multiple times."
                               "--timeout" "5")))
               (when baton-alert--icon-path
                 (setq args (append args (list "--app-icon" baton-alert--icon-path))))
-              (apply #'start-process "baton-alerter" nil "alerter" args))))
+              (inheritenv (apply #'start-process "baton-alerter" nil "alerter" args)))))
 
 ;; 2. OSC 777: terminal escape for SSH sessions
 (baton-alert--register-builtin

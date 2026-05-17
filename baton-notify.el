@@ -183,7 +183,7 @@ Returns non-nil if the notification was fired."
   "Timer that drives global notification polling and unread clearing.")
 
 (defun baton-notify--global-tick ()
-  "Global timer tick: clear unread for visible sessions, fire pending notifications."
+  "Global timer: clear unread for visible sessions, fire pending notifications."
   (let ((now (float-time)))
     (dolist (session (baton-session-list))
       (let* ((buf (baton--session-buffer session))

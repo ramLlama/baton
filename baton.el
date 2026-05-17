@@ -2,7 +2,7 @@
 
 ;; Author: Ram Raghunathan
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "30.1") (vterm) (transient))
+;; Package-Requires: ((emacs "30.1") (vterm) (transient) (inheritenv))
 ;; Keywords: tools, ai
 ;; URL: https://github.com/ramraghunathan/baton
 
@@ -50,9 +50,10 @@ Each plist has keys: :command, :args, :status-function,
 NAME is a symbol (e.g. `claude-code').
 COMMAND is the shell command string.
 ARGS is a list of default arguments (default: nil).
-STATUS-FUNCTION is an optional function (SESSION) -> (cons SYMBOL VALUE) or nil.
-SYMBOL may be waiting, error, other, running, or idle; nil means idle.
-Use `baton-process-make-regex-status-function' to build one from a pattern alist.
+STATUS-FUNCTION is an optional function (SESSION) -> (cons SYMBOL VALUE) or
+nil.  SYMBOL may be waiting, error, other, running, or idle; nil means idle.
+Use `baton-process-make-regex-status-function' to build one from a pattern
+alist.
 STATUS-FUNCTION-TRIGGER is required: `:periodic' means the watcher calls
 STATUS-FUNCTION on each quiet-period tick; `:on-event' means status is driven
 by external events (e.g., hook handlers) and the watcher never calls it.
@@ -142,7 +143,7 @@ this setting."
 
 (defun baton--on-monet-mode ()
   "Activate baton monet integration when monet-mode is enabled."
-  (when monet-mode
+  (when (and (boundp 'monet-mode) monet-mode)
     (baton-monet-setup)))
 
 (defun baton--setup-hooks ()

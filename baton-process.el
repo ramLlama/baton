@@ -13,6 +13,7 @@
 
 ;;; Code:
 (require 'cl-lib)
+(require 'inheritenv)
 (require 'baton-session)
 
 (defvar vterm-shell)
@@ -67,34 +68,38 @@ named \"*baton:<name>*\" and the session's buffer slot is updated."
          (command (baton--session-command session))
          (buf-name (format "*baton:%s*" (baton--session-name session)))
          (buf (get-buffer-create buf-name))
-         ;; Dynamic bindings: vterm-mode reads these during initialization.
-         ;; vterm-shell launches the agent command directly instead of $SHELL.
-         (vterm-shell command)
-         (vterm-term-environment-variable baton-term-name))
-    (with-current-buffer buf
-      (let ((default-directory (file-name-as-directory dir)))
-        ;; vterm-mode must run while the buffer is in a real window so the
-        ;; PTY gets the correct terminal size (TIOCGWINSZ).  Deleting the
-        ;; window afterwards resizes the PTY to 0; if the agent process
-        ;; queries the terminal size before the window reappears it will
-        ;; see degenerate dimensions and may disable its TUI/colors.
-        ;; save-selected-window keeps the buffer in a visible window
-        ;; without clobbering the user's selection; baton-new's
-        ;; pop-to-buffer then switches focus to the buffer.
-        (save-selected-window
-          (pop-to-buffer buf)
-          (let* ((agent-def (gethash (baton--session-agent session)
-                                     baton-agents))
-                 (env-fns   (and agent-def (plist-get agent-def :env-functions)))
-                 (extra-env (when env-fns
-                              (apply #'append
-                                     (mapcar (lambda (fn)
-                                               (funcall fn (baton--session-name session) dir))
-                                             env-fns))))
-                 (process-environment (if extra-env
-                                          (append extra-env process-environment)
-                                        process-environment)))
-            (vterm-mode))))
+         (agent-def (gethash (baton--session-agent session) baton-agents))
+         (env-fns   (and agent-def (plist-get agent-def :env-functions)))
+         (extra-env (when env-fns
+                      (apply #'append
+                             (mapcar (lambda (fn)
+                                       (funcall fn (baton--session-name session) dir))
+                                     env-fns))))
+         ;; vterm-mode reads these dynamic vars during init; TERM must be
+         ;; set before vterm-shell so the pty is configured before the
+         ;; command launches.
+         (vterm-term-environment-variable baton-term-name)
+         (vterm-shell command))
+    ;; inheritenv must wrap with-current-buffer so it captures the calling
+    ;; buffer's process-environment (set by envrc.el/direnv) before the
+    ;; buffer switch discards it.  extra-env is prepended inside inheritenv
+    ;; so both sources are visible to vterm-mode when it spawns the process.
+    (inheritenv
+     (when extra-env
+       (setq process-environment (append extra-env process-environment)))
+     (with-current-buffer buf
+       (let ((default-directory (file-name-as-directory dir)))
+         ;; vterm-mode must run while the buffer is in a real window so the
+         ;; PTY gets the correct terminal size (TIOCGWINSZ).  Deleting the
+         ;; window afterwards resizes the PTY to 0; if the agent process
+         ;; queries the terminal size before the window reappears it will
+         ;; see degenerate dimensions and may disable its TUI/colors.
+         ;; save-selected-window keeps the buffer in a visible window
+         ;; without clobbering the user's selection; baton-new's
+         ;; pop-to-buffer then switches focus to the buffer.
+         (save-selected-window
+           (pop-to-buffer buf)
+           (vterm-mode)))
       (setq-local baton--current-session session)
       ;; Anchor dired (C-x d) and other directory-sensitive commands to the
       ;; session's working directory, not Emacs's global default-directory.
@@ -111,7 +116,7 @@ named \"*baton:<name>*\" and the session's buffer slot is updated."
       ;; Reset to running when the user types
       (add-hook 'pre-command-hook #'baton-process--on-input nil t)
       ;; Remove session from registry if the buffer is killed externally
-      (add-hook 'kill-buffer-hook #'baton-process--on-buffer-killed nil t))
+      (add-hook 'kill-buffer-hook #'baton-process--on-buffer-killed nil t)))
     (setf (baton--session-buffer session) buf)
     ;; Initialize watcher metadata
     (let ((now (float-time)))
