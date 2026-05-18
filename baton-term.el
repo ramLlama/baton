@@ -78,9 +78,10 @@ killed → `kill-buffer-hook' → baton-process--on-buffer-killed."
   ;; Batch redraws to reduce flicker.
   (setq-local vterm--redraw-immediately nil))
 
-(defun baton-term-ghostel-default-pre ()
-  "Default ghostel pre-activation setup for baton sessions."
+(defun baton-term-ghostel-default-post ()
+  "Default ghostel post-activation setup for baton sessions."
   ;; Prevents ghostel from overwriting baton's buffer name on title sequences.
+  ;; Must run after ghostel-exec, which calls ghostel-mode → kill-all-local-variables.
   (setq-local ghostel-set-title-function nil))
 
 ;;; Customizables
@@ -95,8 +96,8 @@ killed → `kill-buffer-hook' → baton-process--on-buffer-killed."
               :post #'baton-term-vterm-default-post
               :input-commands baton-term-vterm-input-commands)
         (list 'ghostel
-              :pre  #'baton-term-ghostel-default-pre
-              :post nil
+              :pre  nil
+              :post #'baton-term-ghostel-default-post
               :input-commands baton-term-ghostel-input-commands))
   "Alist of (BACKEND :pre FN :post FN :input-commands LIST).
 Mixing plain-symbol alist keys (looked up with `alist-get') and keyword plist
