@@ -12,15 +12,35 @@ Agent environment is evaluated **once** inside `baton-executor--resolve` (via `b
 
 ### Worktree Spawn (`baton-new`)
 
-`baton-new` signature: `(agent-name directory &optional name worktree base)`. The transient infixes `-w` (`--worktree=`) and `-B` (`--base=`) feed WORKTREE and BASE.
+`baton-new` signature: `(agent-name directory &optional name worktree base sandbox)`. The transient infixes `-w` (`--worktree=`), `-B` (`--base=`), and the `-s` switch (`--sandbox`) feed WORKTREE, BASE, and SANDBOX. A shared guard errors when WORKTREE **or** SANDBOX is requested but `baton-sodagun` is not loaded (`featurep 'baton-sodagun`).
 
-When WORKTREE is non-nil, `baton-new` resolves the working directory **up front**, before creating the session:
+**Worktree without sandbox** (`-w` set, `-s` unset): `baton-new` resolves the working directory **up front**, before creating the session:
 
-1. Error if `baton-sodagun` is not loaded (`featurep 'baton-sodagun`).
-2. Call `baton-sodagun--add-worktree (worktree (expand-file-name directory) base)` — a **synchronous** sodagun CLI invocation that briefly blocks Emacs while the worktree is created.
-3. Use the returned WORKTREE-PATH (the `cdr`) as the session's directory.
+1. Call `baton-sodagun--add-worktree (worktree (expand-file-name directory) base)` — a **synchronous** sodagun CLI invocation that briefly blocks Emacs while the worktree is created.
+2. Use the returned WORKTREE-PATH (the `cdr`) as the session's directory.
 
-The session still runs under the `exec` executor (worktree-without-sandbox runs on the host) — only the directory differs. The sandbox executor that would change `executor` is Phase 3 and not yet built. See [domain-model.md](domain-model.md#sodagun-integration-baton-sodagun).
+The session runs under the `exec` executor (worktree-without-sandbox runs on the host) — only the directory differs.
+
+**Sandbox** (`-s` set): the session's executor is `'sodagun`, the worktree is **not** created up front, and the branch/base are stashed in session metadata (`:sodagun-branch`/`:sodagun-base`) for the executor's resolve to consume. The sandbox implies a worktree, so the branch auto-derives from the session name when `-w` is absent. All worktree + sandbox setup happens lazily inside `baton-executor--resolve` at spawn time — see [Sandbox Spawn](#sandbox-spawn-the-sodagun-executor) below.
+
+See [domain-model.md](domain-model.md#sodagun-integration-baton-sodagun).
+
+### Sandbox Spawn (the `sodagun` executor)
+
+When the session's executor is `sodagun`, `baton-process-spawn` calls `baton-executor--resolve` (executor-agnostic, as above), which runs the full sandbox setup in order and registers each step's state incrementally in `baton-sodagun--workspaces`:
+
+1. **Duplicate guard** — error if the session name is already registered.
+2. **Worktree** — `baton-sodagun--add-worktree` with the stashed branch/base (branch auto-derived as `baton/<session-name>` when unset).
+3. **Agent env once** — `baton-executor--agent-env` against the worktree path → `:env` strings + `:ports` (evaluated exactly once, same as `exec`).
+4. **Net rules** — one `allow@host:tcp:PORT` egress rule per declared port.
+5. **Sandbox start** — `baton-sodagun--sandbox-start` with those net rules; records the returned `sandbox_name`.
+6. **Forwarders** — one in-guest socat forwarder per port (guest `127.0.0.1:PORT` → host alias `:PORT`).
+7. **Re-anchor** — point the session's directory slot at the worktree.
+8. **Attach command** — return `(:directory WORKTREE :command "sodagun sandbox attach …--env K=V… -- <agent-cmd>" :extra-env nil)`. Env reaches the agent via attach `--env`, **not** the host `process-environment`; the attach command is launched later by `baton-process-spawn` in the terminal backend like any other session command.
+
+If any step signals mid-resolve, a `condition-case` runs `baton-executor--teardown` on the partial state (forwarders killed, sandbox removed only if it started, worktree kept) and re-signals.
+
+**Teardown flow.** On `baton-session-killed-hook`, `baton-executor--teardown-on-kill` dispatches to the `sodagun` teardown method: kill the forwarders, then issue an **async** `sodagun sandbox remove` (only when a `sandbox-name` was recorded), keep the worktree, and drop the registry entry. Idempotent — the entry is removed on the first call. The agent's attach process dies with the terminal buffer before this fires, so the sandbox has no live users when removal runs.
 
 ## Output Watcher
 

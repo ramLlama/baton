@@ -197,7 +197,7 @@ then `default-directory'."
      (t       default-directory))))
 
 ;;;###autoload
-(defun baton-new (agent-name directory &optional name worktree base)
+(defun baton-new (agent-name directory &optional name worktree base sandbox)
   "Spawn a new agent session.
 AGENT-NAME is a string naming the agent (e.g. \"claude-code\").
 DIRECTORY is the working directory for the session; auto-detected from the
@@ -207,6 +207,10 @@ NAME is an optional display name; prompted when called with \\[universal-argumen
 WORKTREE is an optional branch name; when given, a sodagun worktree on that
 branch is created from DIRECTORY's repository (optionally based on ref BASE)
 and the session runs in the worktree instead of DIRECTORY.
+When SANDBOX is non-nil the session runs inside a sodagun sandbox (the
+`sodagun' executor); the worktree and sandbox are then created lazily at
+spawn time, and a worktree is implied even without WORKTREE (the branch
+name is derived from the session name).
 When `baton-default-agent' is set, AGENT-NAME defaults to that agent and no
 prompt is shown unless a prefix argument is given."
   (interactive
@@ -217,6 +221,7 @@ prompt is shown unless a prefix argument is given."
           (directory-from-args (and args (transient-arg-value "--directory=" args)))
           (worktree-from-args  (and args (transient-arg-value "--worktree="  args)))
           (base-from-args      (and args (transient-arg-value "--base="      args)))
+          (sandbox-from-args   (and args (transient-arg-value "--sandbox"    args)))
           (agent-name (or agent-from-args
                           (and baton-default-agent
                                (not current-prefix-arg)
@@ -233,16 +238,18 @@ prompt is shown unless a prefix argument is given."
                          (if (equal current-prefix-arg '(16))
                              (read-directory-name "Directory: ")
                            (baton--detect-directory)))))
-     (list agent-name directory name worktree-from-args base-from-args)))
+     (list agent-name directory name worktree-from-args base-from-args
+           sandbox-from-args)))
   (let* ((agent (intern agent-name))
          (def (gethash agent baton-agents)))
     (unless def
       (error "Unknown agent: %s" agent-name))
+    (when (and (or worktree sandbox) (not (featurep 'baton-sodagun)))
+      (error "Worktree/sandbox spawn requires the sodagun CLI (baton-sodagun not loaded)"))
     ;; Worktree without sandbox: resolve the directory up front; the session
-    ;; itself runs directly on the host (executor stays `exec').
-    (when worktree
-      (unless (featurep 'baton-sodagun)
-        (error "Worktree spawn requires the sodagun CLI (baton-sodagun not loaded)"))
+    ;; itself runs directly on the host (executor stays `exec').  With
+    ;; sandbox, the sodagun executor creates worktree + sandbox at spawn.
+    (when (and worktree (not sandbox))
       (setq directory (cdr (baton-sodagun--add-worktree
                             worktree (expand-file-name directory) base))))
     (let* ((args (plist-get def :args))
@@ -256,7 +263,12 @@ prompt is shown unless a prefix argument is given."
                      :agent agent
                      :command command
                      :directory (expand-file-name directory)
-                     :name name)))
+                     :name name
+                     :executor (if sandbox 'sodagun 'exec))))
+      (when sandbox
+        ;; Stash worktree intent for the executor's resolve to consume.
+        (setf (baton--session-metadata session)
+              (list :sodagun-branch worktree :sodagun-base base)))
       (baton-process-spawn session)
       (when-let* ((buf (baton--session-buffer session)))
         (pop-to-buffer buf))
@@ -369,6 +381,7 @@ When unset, sodagun's own default base ref applies."
     ("-D" baton--directory-infix)
     ("-w" baton--worktree-infix)
     ("-B" baton--base-infix)
+    ("-s" "Sandbox (this spawn)" "--sandbox" :if baton--sodagun-usable-p)
     ("n" "New session"        baton-new)
     ("k" "Kill session"       baton-kill)
     ("K" "Kill all"           baton-kill-all)]
