@@ -47,6 +47,7 @@ test: compile
 	  --eval "(package-initialize)" \
 	  -l ert \
 	  -l baton-session.el \
+	  -l baton-executor.el \
 	  -l baton-term.el \
 	  -l baton-process.el \
 	  -l baton-notify.el \

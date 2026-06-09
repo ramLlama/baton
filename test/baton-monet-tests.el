@@ -274,7 +274,7 @@ Even when the terminal output matches a different waiting pattern (e.g.
 (ert-deftest baton-test-monet-session-env-function ()
   "`baton-monet--session-env-function' returns MONET_CTX_baton_session env var."
   (should (equal (baton-monet--session-env-function "claude-1" "/proj")
-                 '("MONET_CTX_baton_session=claude-1"))))
+                 '(:env ("MONET_CTX_baton_session=claude-1")))))
 
 ;;; ─── baton-monet-setup / baton-monet--teardown tests ────────────────────────
 

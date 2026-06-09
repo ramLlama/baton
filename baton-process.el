@@ -14,6 +14,7 @@
 (require 'cl-lib)
 (require 'inheritenv)
 (require 'baton-session)
+(require 'baton-executor)
 (require 'baton-term)
 
 (defvar baton-agents)
@@ -49,19 +50,16 @@ the first matching REGEXP, or nil if none match."
 
 (defun baton-process-spawn (session)
   "Spawn a terminal buffer for SESSION and start the output watcher.
-The session command is launched in the configured terminal backend.
-The buffer is named \"*baton:<name>*\" and the session's buffer slot is updated."
-  (let* ((dir (or (baton--session-directory session) default-directory))
-         (command (baton--session-command session))
+Pre-spawn setup (directory, command, environment) is delegated to the
+session's executor via `baton-executor--resolve'; the resolved command is
+then launched in the configured terminal backend.  The buffer is named
+\"*baton:<name>*\" and the session's buffer slot is updated."
+  (let* ((resolved (baton-executor--resolve (baton--session-executor session) session))
+         (dir (plist-get resolved :directory))
+         (command (plist-get resolved :command))
+         (extra-env (plist-get resolved :extra-env))
          (buf-name (format "*baton:%s*" (baton--session-name session)))
-         (buf (get-buffer-create buf-name))
-         (agent-def (gethash (baton--session-agent session) baton-agents))
-         (env-fns   (and agent-def (plist-get agent-def :env-functions)))
-         (extra-env (when env-fns
-                      (apply #'append
-                             (mapcar (lambda (fn)
-                                       (funcall fn (baton--session-name session) dir))
-                                     env-fns)))))
+         (buf (get-buffer-create buf-name)))
     ;; inheritenv must wrap baton-term-spawn-in-buffer so it captures the calling
     ;; buffer's process-environment (set by envrc.el/direnv) before the buffer
     ;; switch discards it.  extra-env is prepended inside inheritenv so both

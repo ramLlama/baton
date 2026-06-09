@@ -1,5 +1,15 @@
 # Architecture
 
+## Spawn Flow & Executors
+
+`baton-process-spawn` is **executor-agnostic**. It does not compute the directory, command, or environment itself; instead it asks the session's executor:
+
+1. Call `baton-executor--resolve (executor session)` -> `(:directory DIR :command CMD :extra-env ENV)`.
+2. Create the buffer `*baton:<name>*`, then under `inheritenv` (which captures the calling buffer's `process-environment` from envrc/direnv before the buffer switch discards it) prepend `:extra-env` and spawn via `baton-term-spawn-in-buffer`.
+3. Install buffer-local hooks (`baton-process--on-input`, `baton-process--on-buffer-killed`), anchor `default-directory`, initialize watcher metadata, and start the watcher.
+
+Agent environment is evaluated **once** inside `baton-executor--resolve` (via `baton-executor--agent-env`), eliminating the prior double-evaluation of `:env-functions`. Each env-function must return `(:env STRINGS :ports PORTS)` or nil; `:ports` from all functions are aggregated and deduped (the `exec` executor ignores `:ports` since localhost is reachable). See [domain-model.md](domain-model.md#executor-baton-executor).
+
 ## Output Watcher
 
 The watcher is a repeating timer (0.5s interval) started **only for `:periodic` sessions** (`baton-process--start-watcher` checks `:status-function-trigger` in `baton-agents`). Sessions with `:on-event` trigger do not get a watcher timer at all — their status is driven entirely by external hooks.
@@ -59,7 +69,7 @@ Intercepts monet's `openDiff` tool via `monet-make-tool :set :baton`. When Claud
 
 For `:on-event` agents (claude-code when monet is active), status is driven by monet hook events instead of the periodic watcher:
 
-1. **Env propagation**: `baton-monet--session-env-function` is registered as an `:env-function` for claude-code. It injects `MONET_CTX_baton_session=<session-name>` into the agent's environment, allowing monet to include the session name in hook event context.
+1. **Env propagation**: `baton-monet--session-env-function` is registered as an `:env-function` for claude-code. It returns `(:env ("MONET_CTX_baton_session=<session-name>"))`, injecting the session name into the agent's environment so monet can include it in hook event context. (Like all env-functions, it returns the `(:env STRINGS :ports PORTS)` plist shape.)
 2. **Hook dispatch**: `baton-monet--claude-hook-handler` is registered with monet and receives `(EVENT-NAME DATA CTX)`. It looks up the baton session from the `baton_session` key in CTX, then dispatches:
    - `UserPromptSubmit` -> `running`
    - `Stop` -> `idle`

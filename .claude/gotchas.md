@@ -35,3 +35,9 @@
 17. **Alert handler errors are caught** by `condition-case-unless-debug` in `baton-alert--dispatch`. A failing backend logs once to `*Messages*` but does not propagate into the watcher timer.
 
 18. **All `baton-alert--` symbols are private** by double-dash convention. The API is architected for future promotion to public (single-dash) naming but is not yet stable.
+
+19. **Env-functions must return the `(:env STRINGS :ports PORTS)` plist shape**, or nil. A bare list of `"VAR=VALUE"` strings (the old contract) is now a **hard error** in `baton-executor--agent-env` — fail-fast with no legacy tolerance. Both keys are optional within the plist, but the top-level value must be a plist (first element a keyword) or nil.
+
+20. **`:env-functions` are evaluated exactly once per spawn**, inside `baton-executor--resolve`. Earlier code evaluated them twice; do not reintroduce a second evaluation in `baton-process-spawn`, which is now executor-agnostic and treats the resolved `(:directory :command :extra-env)` plist as opaque.
+
+21. **Executor teardown is registered at load time, not by `baton-mode`.** `baton-executor--teardown-on-kill` is added to `baton-session-killed-hook` when `baton-executor.el` loads, so it survives `baton-mode` toggles and runs even when the mode is off. Consequently, `baton-executor--teardown` implementations **must be idempotent** — do not assume exactly-once invocation.

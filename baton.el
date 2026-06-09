@@ -59,8 +59,10 @@ alist.
 STATUS-FUNCTION-TRIGGER is required: `:periodic' means the watcher calls
 STATUS-FUNCTION on each quiet-period tick; `:on-event' means status is driven
 by external events (e.g., hook handlers) and the watcher never calls it.
-ENV-FUNCTIONS is a list of functions (KEY DIRECTORY) -> list of
-\"VAR=VALUE\" strings (default: nil)."
+ENV-FUNCTIONS is a list of functions (KEY DIRECTORY) -> plist
+\(:env STRINGS :ports PORTS) where STRINGS is a list of \"VAR=VALUE\"
+assignments and PORTS lists host ports the agent process must be able to
+reach (so sandboxed executors can forward them).  Default: nil."
   (unless (memq status-function-trigger '(:periodic :on-event))
     (error "baton-define-agent: :status-function-trigger must be `:periodic' or `:on-event', got %S"
            status-function-trigger))
@@ -75,7 +77,8 @@ ENV-FUNCTIONS is a list of functions (KEY DIRECTORY) -> list of
 (defun baton-add-env-function (agent fn)
   "Add FN to the env-functions list for AGENT if not already present.
 Idempotent: calling with the same FN twice has the same effect as calling once.
-FN must accept (KEY DIRECTORY) and return a list of \"VAR=VALUE\" strings.
+FN must accept (KEY DIRECTORY) and return a plist
+\(:env STRINGS :ports PORTS); see `baton-define-agent'.
 AGENT is a symbol key in `baton-agents'."
   (when-let* ((def (gethash agent baton-agents)))
     (unless (member fn (plist-get def :env-functions))

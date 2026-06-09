@@ -6,6 +6,7 @@ The central data structure. A `cl-defstruct` with fields:
 - `name` -- unique string, also the registry key (auto-generated as `"<agent-prefix>-<n>"` or user-provided). Duplicates are rejected at creation time with an error.
 - `agent` -- symbol key into `baton-agents` (e.g., `'claude-code`, `'aider`)
 - `command`, `directory`, `buffer` -- the shell command, working dir, and vterm buffer
+- `executor` -- symbol selecting *how/where* the command runs (default `exec` = direct host execution). Orthogonal to `agent` (*what* runs). See [Executor](#executor-baton-executor) below.
 - `status` -- symbol: `running`, `waiting`, `idle`, `error`, or `other`
 - `waiting-reason` -- string describing why the agent is waiting, in error, or in other status (e.g., "permission prompt")
 - `created-at`, `updated-at` -- `float-time` timestamps
@@ -18,6 +19,7 @@ A hash-table (`eq` test) mapping agent symbols to definition plists. Each plist 
 - `:args` -- default argument list
 - `:status-function` -- optional function `(SESSION) -> (cons SYMBOL REASON) | nil`. Receives a `baton--session` struct; call `baton-process-session-tail` internally to get buffer text if needed. SYMBOL is a plain symbol (`waiting`, `error`, `other`, `running`, `idle`) -- not a keyword. `nil` also means idle. `baton-process-make-regex-status-function` builds a pattern-based status function (calls `baton-process-session-tail` automatically); its alist format is `(REGEXP . (SYMBOL . REASON))`.
 - `:status-function-trigger` -- required symbol: `:periodic` (watcher calls status function each tick) or `:on-event` (status function is driven by external hooks, not the watcher). `baton-define-agent` validates this value and signals an error for anything else.
+- `:env-functions` -- list of functions, each `(SESSION-NAME DIRECTORY) -> (:env STRINGS :ports PORTS) | nil`. `:env` is a list of `"VAR=VALUE"` strings injected into the agent's environment; `:ports` is a list of host ports the agent process must be able to reach. Returning nil contributes nothing. **Any other return shape (including a bare list of `"VAR=VALUE"` strings) is a hard error** -- the contract is enforced fail-fast in `baton-executor--agent-env`, with no legacy tolerance. Append functions with `baton-add-env-function` (idempotent).
 
 Register new agents with `baton-define-agent`. Three built-in: `claude-code`, `aider`, `codex` (all `:periodic`).
 
@@ -25,6 +27,21 @@ Register new agents with `baton-define-agent`. Three built-in: `claude-code`, `a
 
 - `baton--sessions` -- hash-table (session name string -> session struct)
 - `baton--session-counters` -- hash-table (agent symbol -> integer counter)
+
+## Executor (`baton-executor`)
+
+The **executor** is the second of a session's two orthogonal axes: the `agent` decides *what* runs (`baton-agents`), the `executor` decides *how/where* it runs (the session's `executor` slot). Executors plug in via `cl-defgeneric` dispatch on the executor symbol, mirroring `baton-term.el`'s terminal-backend dispatch. Lives in `baton-executor.el` (requires only `cl-lib` + `baton-session`, plus a `defvar baton-agents` declaration).
+
+Generic interface:
+- `baton-executor--resolve (executor session)` -- pre-spawn setup; returns a plist `(:directory DIR :command CMD :extra-env ENV)`. `:extra-env` is a list of `"VAR=VALUE"` strings prepended to the host `process-environment`, or nil when the executor delivers env another way. `baton-process-spawn` calls this and treats the result as opaque, so spawning is executor-agnostic.
+- `baton-executor--teardown (executor session)` -- release resources held for the session. Default method is a no-op. **Implementations must be idempotent.**
+- `baton-executor--teardown-on-kill (session)` -- dispatches teardown for the session's executor; registered on `baton-session-killed-hook` **at load time** (not by `baton-mode`), so it survives `baton-mode` toggles.
+- `baton-executor--agent-env (session dir)` -- evaluates the agent's `:env-functions` **exactly once** with `(SESSION-NAME DIR)`, aggregating results into `(:env STRINGS :ports PORTS)` (ports deduped via `delete-dups`). Enforces the env-function plist contract (errors on any other shape).
+
+Built-in executor:
+- **`exec`** -- direct host execution (the default). `baton-executor--resolve` uses the session's own directory and command, and exposes aggregated agent `:env` as `:extra-env`. `:ports` is ignored because localhost is already reachable.
+
+> Forward pointer: this is Phase 1 of a planned multi-executor design. A future optional `baton-sodagun.el` will add a `sodagun` executor (git worktree + microVM sandbox via the `sodagun` CLI), where `:ports` will drive guest→host port forwarding. Not yet built -- do not assume it exists.
 
 ## Status Observation
 
@@ -71,4 +88,4 @@ Key private symbols (double-dash, architected for future promotion to public):
 - `baton-session-status-changed-hook` -- args: `(session old-status new-status)`
 - `baton-session-unread-changed-hook` -- args: `(session)` — fires on read→unread transition
 
-These are wired up by `baton--setup-hooks` when `baton-mode` is enabled.
+Most are wired up by `baton--setup-hooks` when `baton-mode` is enabled. Exception: `baton-executor--teardown-on-kill` is added to `baton-session-killed-hook` at `baton-executor.el` **load time**, independent of `baton-mode`, so executor teardown runs even when `baton-mode` is off or has been toggled.

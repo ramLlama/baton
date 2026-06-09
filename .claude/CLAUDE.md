@@ -18,6 +18,7 @@ Baton is an Emacs Lisp package for managing multiple AI coding agents (Claude Co
 ```
 baton/
   baton-session.el    -- Session struct (cl-defstruct), hash-table registries, lifecycle hooks
+  baton-executor.el   -- Execution-environment abstraction: executor generics (resolve/teardown), agent-env aggregation, reference `exec` executor
   baton-process.el    -- vterm spawning, 500ms debounced output watcher, pure pattern matcher
   baton-notify.el     -- Modeline segment B[Nw/Ni/Nr N*], *Baton* tabulated-list buffer, baton-jump
   baton-alert.el      -- Desktop alert backend registry: alerter, OSC 777, D-Bus/toast, echo fallback
@@ -46,11 +47,12 @@ baton/
 Strict require chain -- each file requires only what it needs:
 
 1. `baton-session` -- no baton dependencies (requires only `cl-lib`)
-2. `baton-process` -- requires `baton-session`
-3. `baton-notify` -- requires `baton-session`
-4. `baton-alert` -- requires `baton-session`, `baton-notify`
-5. `baton-monet` -- requires `baton-session` (monet symbols are `declare-function` only)
-6. `baton` -- requires `baton-session`, `baton-process`, `baton-notify`, `baton-alert`; conditionally loads `baton-monet`
+2. `baton-executor` -- requires `baton-session` (and `defvar baton-agents` declaration)
+3. `baton-process` -- requires `baton-session`, `baton-executor`, `baton-term`
+4. `baton-notify` -- requires `baton-session`
+5. `baton-alert` -- requires `baton-session`, `baton-notify`
+6. `baton-monet` -- requires `baton-session` (monet symbols are `declare-function` only)
+7. `baton` -- requires `baton-session`, `baton-process`, `baton-notify`, `baton-alert`; conditionally loads `baton-monet`
 
 ## Development Workflow
 
@@ -96,10 +98,12 @@ M-x ert RET baton-test-session-create-returns-struct RET
 - No `require 'vterm` at top level -- only inside functions that need it (`baton-process-spawn`)
 - Optional dependencies use `declare-function` for byte-compiler silence + `featurep` guards at runtime
 - `:status-function` returns `(SYMBOL . REASON)` where SYMBOL is a plain symbol (`waiting`, `idle`, `running`, `error`, `other`), not a keyword. Pattern alists use the same convention: `(REGEXP . (SYMBOL . REASON))`.
+- `:env-functions` each take `(SESSION-NAME DIRECTORY)` and MUST return a plist `(:env STRINGS :ports PORTS)` (or nil for no contribution). `:env` is a list of `"VAR=VALUE"` strings; `:ports` is a list of host ports the agent must reach. Any other shape (e.g., a bare list of `"VAR=VALUE"` strings) is a hard error -- see [domain-model.md](domain-model.md).
+- Executor generics (`baton-executor--resolve`, `baton-executor--teardown`) dispatch on the session's `executor` symbol via `cl-defmethod ((_executor (eql SYM)) ...)`, mirroring `baton-term.el`'s terminal-backend dispatch. `baton-executor--teardown` implementations must be idempotent.
 
 ## Further Reading
 
 - **[domain-model.md](domain-model.md)** -- Session struct, agent registry, status observation, unread tracking, alert backends, hooks
 - **[architecture.md](architecture.md)** -- Output watcher algorithm, notification surface, monet integration
-- **[gotchas.md](gotchas.md)** -- Critical idiosyncrasies and non-obvious behaviors (18 items)
+- **[gotchas.md](gotchas.md)** -- Critical idiosyncrasies and non-obvious behaviors (21 items)
 - **[commands.md](commands.md)** -- User commands and transient dispatch keybindings

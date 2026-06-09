@@ -69,7 +69,7 @@ Also calls `baton-session-set-status' so the change is applied immediately."
 (defun baton-monet--session-env-function (session-name _directory)
   "Return env vars injecting SESSION-NAME into the Claude Code process environment.
 Injects MONET_CTX_baton_session so hook handlers can look up the session."
-  (list (format "MONET_CTX_baton_session=%s" session-name)))
+  (list :env (list (format "MONET_CTX_baton_session=%s" session-name))))
 
 ;;; Hook Handler
 
