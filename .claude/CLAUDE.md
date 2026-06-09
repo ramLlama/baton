@@ -10,6 +10,7 @@ Baton is an Emacs Lisp package for managing multiple AI coding agents (Claude Co
 - **Emacs minimum**: 29.1
 - **Required dependency**: vterm (>= 0.0.2) -- agents run in vterm buffers
 - **Optional dependency**: monet (sibling repo at `../monet`) -- diff review integration
+- **Optional CLI**: sodagun (external binary on `exec-path`) -- git-worktree-based sessions (and, later, microVM sandboxes)
 - **Testing**: ERT (Emacs Regression Testing framework)
 - **Build**: GNU Make (`make checkdoc`, `make compile`, `make test`)
 
@@ -23,6 +24,7 @@ baton/
   baton-notify.el     -- Modeline segment B[Nw/Ni/Nr N*], *Baton* tabulated-list buffer, baton-jump
   baton-alert.el      -- Desktop alert backend registry: alerter, OSC 777, D-Bus/toast, echo fallback
   baton-monet.el      -- Optional monet integration: openDiff override, event-driven status via hook handler
+  baton-sodagun.el    -- Optional sodagun CLI integration: synchronous JSON wrapper, worktree creation for baton-new
   baton.el            -- Agent registry, baton-mode global minor mode, user commands, keymaps
   test/
     baton-test-helpers.el   -- Shared ERT macros (baton-test-with-clean-state, baton-alert-test-with-clean-state)
@@ -30,6 +32,7 @@ baton/
     baton-process-tests.el  -- Agent registry, status-function dispatch, env-functions
     baton-notify-tests.el   -- Modeline, timers, status buffer, error/other notify
     baton-monet-tests.el    -- Monet diff workflow
+    baton-sodagun-tests.el  -- sodagun JSON wrapper, worktree creation, baton-new worktree path (all stub the CLI)
     baton-alert-tests.el    -- Alert backends
   Makefile             -- checkdoc / compile / test / pre-commit targets; TEST_FILES variable
   .gitignore           -- *.elc
@@ -52,7 +55,8 @@ Strict require chain -- each file requires only what it needs:
 4. `baton-notify` -- requires `baton-session`
 5. `baton-alert` -- requires `baton-session`, `baton-notify`
 6. `baton-monet` -- requires `baton-session` (monet symbols are `declare-function` only)
-7. `baton` -- requires `baton-session`, `baton-process`, `baton-notify`, `baton-alert`; conditionally loads `baton-monet`
+7. `baton-sodagun` -- requires `baton-session`, `baton-executor` (optional; loaded by `baton-mode` only when the `sodagun` binary is found)
+8. `baton` -- requires `baton-session`, `baton-process`, `baton-notify`, `baton-alert`; conditionally loads `baton-monet` and `baton-sodagun` (sodagun symbols are `declare-function` only)
 
 ## Development Workflow
 
@@ -105,5 +109,5 @@ M-x ert RET baton-test-session-create-returns-struct RET
 
 - **[domain-model.md](domain-model.md)** -- Session struct, agent registry, status observation, unread tracking, alert backends, hooks
 - **[architecture.md](architecture.md)** -- Output watcher algorithm, notification surface, monet integration
-- **[gotchas.md](gotchas.md)** -- Critical idiosyncrasies and non-obvious behaviors (21 items)
+- **[gotchas.md](gotchas.md)** -- Critical idiosyncrasies and non-obvious behaviors (23 items)
 - **[commands.md](commands.md)** -- User commands and transient dispatch keybindings

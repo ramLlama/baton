@@ -10,9 +10,13 @@ Invoke via `M-x baton` or bind with `(global-set-key (kbd "C-c b") #'baton)`.
 |------|--------------------------|--------------------------------------------------|
 | `-a` | `baton--agent-infix`    | Agent for this spawn (ephemeral)                 |
 | `-n` | `baton--name-infix`     | Session name for this spawn (ephemeral)          |
+| `-w` | `baton--worktree-infix` | sodagun worktree branch to run the session in    |
+| `-B` | `baton--base-infix`     | Base ref for the worktree branch (unset = sodagun default) |
 | `n`  | `baton-new`             | Spawn a new agent session                        |
 | `k`  | `baton-kill`            | Kill a session by name                           |
 | `K`  | `baton-kill-all`        | Kill all sessions                                |
+
+The `-w` and `-B` infixes appear only when sodagun is usable (`baton--sodagun-usable-p`: `baton-sodagun` loaded **and** the `sodagun` binary on `exec-path`). Setting `-w` makes the next `baton-new` create a sodagun worktree on that branch and run the session there (on the host); `-B` overrides the base ref the branch is cut from.
 
 **Navigate**:
 

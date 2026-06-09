@@ -41,7 +41,17 @@ Generic interface:
 Built-in executor:
 - **`exec`** -- direct host execution (the default). `baton-executor--resolve` uses the session's own directory and command, and exposes aggregated agent `:env` as `:extra-env`. `:ports` is ignored because localhost is already reachable.
 
-> Forward pointer: this is Phase 1 of a planned multi-executor design. A future optional `baton-sodagun.el` will add a `sodagun` executor (git worktree + microVM sandbox via the `sodagun` CLI), where `:ports` will drive guest→host port forwarding. Not yet built -- do not assume it exists.
+> Forward pointer: `exec` is Phase 1 of a planned multi-executor design. **Phase 2 (built)** adds optional `baton-sodagun.el` — see [sodagun Integration](#sodagun-integration-baton-sodagun) below — which creates git worktrees via the `sodagun` CLI but still runs the session on the host under the `exec` executor (no new executor symbol yet). **Phase 3 (not built)** will add a real `sodagun` executor running the session in a microVM sandbox (transient `-s` flag), where `:ports` will drive guest→host port forwarding. Do not assume the sandbox executor exists.
+
+## sodagun Integration (`baton-sodagun`)
+
+Optional module integrating the external **sodagun CLI** (worktree/sandbox manager). Requires `cl-lib`, `baton-session`, `baton-executor`. Loaded by `baton-mode` only when the `sodagun` binary is on `exec-path`; `baton.el` references its symbols via `declare-function`.
+
+- `baton-sodagun-available-p` -- non-nil when the `sodagun` binary is on `exec-path`.
+- `baton-sodagun--run (&rest args)` -- synchronous `call-process` wrapper. Always passes the global flags `--output json --quiet` **before** the subcommand ARGS. sodagun prints its result as a single JSON line, but setup scripts may log progress lines above it, so the wrapper parses the **last line starting with `{`** (`re-search-backward "^{"`), returns it as an alist (`json-parse-buffer :object-type 'alist`), and signals an error (shell-quoted command + captured output) on non-zero exit or when no JSON line is found.
+- `baton-sodagun--add-worktree (branch repo &optional base)` -- shells `sodagun git add-worktree BRANCH REPO [--base BASE]`. Parses `rootdir` from the JSON, then reads `<rootdir>/sodagun.json` for `worktree_path`. Returns `(ROOTDIR . WORKTREE-PATH)`. **Fails fast** when the metadata file is missing/unreadable, when either path is absent, or when either path is non-absolute (downstream code anchors sessions to these paths verbatim).
+
+This module does **not** define an executor or register hooks; worktree sessions run under the default `exec` executor. See [architecture.md](architecture.md#worktree-spawn-baton-new) for how `baton-new` consumes it.
 
 ## Status Observation
 

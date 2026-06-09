@@ -10,6 +10,18 @@
 
 Agent environment is evaluated **once** inside `baton-executor--resolve` (via `baton-executor--agent-env`), eliminating the prior double-evaluation of `:env-functions`. Each env-function must return `(:env STRINGS :ports PORTS)` or nil; `:ports` from all functions are aggregated and deduped (the `exec` executor ignores `:ports` since localhost is reachable). See [domain-model.md](domain-model.md#executor-baton-executor).
 
+### Worktree Spawn (`baton-new`)
+
+`baton-new` signature: `(agent-name directory &optional name worktree base)`. The transient infixes `-w` (`--worktree=`) and `-B` (`--base=`) feed WORKTREE and BASE.
+
+When WORKTREE is non-nil, `baton-new` resolves the working directory **up front**, before creating the session:
+
+1. Error if `baton-sodagun` is not loaded (`featurep 'baton-sodagun`).
+2. Call `baton-sodagun--add-worktree (worktree (expand-file-name directory) base)` — a **synchronous** sodagun CLI invocation that briefly blocks Emacs while the worktree is created.
+3. Use the returned WORKTREE-PATH (the `cdr`) as the session's directory.
+
+The session still runs under the `exec` executor (worktree-without-sandbox runs on the host) — only the directory differs. The sandbox executor that would change `executor` is Phase 3 and not yet built. See [domain-model.md](domain-model.md#sodagun-integration-baton-sodagun).
+
 ## Output Watcher
 
 The watcher is a repeating timer (0.5s interval) started **only for `:periodic` sessions** (`baton-process--start-watcher` checks `:status-function-trigger` in `baton-agents`). Sessions with `:on-event` trigger do not get a watcher timer at all — their status is driven entirely by external hooks.

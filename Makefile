@@ -52,6 +52,7 @@ test: compile
 	  -l baton-process.el \
 	  -l baton-notify.el \
 	  -l baton-alert.el \
+	  -l baton-sodagun.el \
 	  $(if $(MONET_DIR),-l monet -l baton-monet.el) \
 	  -l baton.el \
 	  $(foreach f,$(TEST_FILES),-l $(f)) \

@@ -36,6 +36,8 @@
 (declare-function baton-monet-setup    "baton-monet" ())
 (declare-function baton-monet--teardown "baton-monet" ())
 (declare-function baton-review-diff    "baton-monet" (session-name))
+(declare-function baton-sodagun-available-p  "baton-sodagun" ())
+(declare-function baton-sodagun--add-worktree "baton-sodagun" (branch repo &optional base))
 
 ;;; Agent Registry
 
@@ -195,13 +197,16 @@ then `default-directory'."
      (t       default-directory))))
 
 ;;;###autoload
-(defun baton-new (agent-name directory &optional name)
+(defun baton-new (agent-name directory &optional name worktree base)
   "Spawn a new agent session.
 AGENT-NAME is a string naming the agent (e.g. \"claude-code\").
 DIRECTORY is the working directory for the session; auto-detected from the
 current buffer unless a double prefix argument \\[universal-argument] \
 \\[universal-argument] is given.
 NAME is an optional display name; prompted when called with \\[universal-argument].
+WORKTREE is an optional branch name; when given, a sodagun worktree on that
+branch is created from DIRECTORY's repository (optionally based on ref BASE)
+and the session runs in the worktree instead of DIRECTORY.
 When `baton-default-agent' is set, AGENT-NAME defaults to that agent and no
 prompt is shown unless a prefix argument is given."
   (interactive
@@ -210,6 +215,8 @@ prompt is shown unless a prefix argument is given."
           (agent-from-args     (and args (transient-arg-value "--agent="     args)))
           (name-from-args      (and args (transient-arg-value "--name="      args)))
           (directory-from-args (and args (transient-arg-value "--directory=" args)))
+          (worktree-from-args  (and args (transient-arg-value "--worktree="  args)))
+          (base-from-args      (and args (transient-arg-value "--base="      args)))
           (agent-name (or agent-from-args
                           (and baton-default-agent
                                (not current-prefix-arg)
@@ -226,11 +233,18 @@ prompt is shown unless a prefix argument is given."
                          (if (equal current-prefix-arg '(16))
                              (read-directory-name "Directory: ")
                            (baton--detect-directory)))))
-     (list agent-name directory name)))
+     (list agent-name directory name worktree-from-args base-from-args)))
   (let* ((agent (intern agent-name))
          (def (gethash agent baton-agents)))
     (unless def
       (error "Unknown agent: %s" agent-name))
+    ;; Worktree without sandbox: resolve the directory up front; the session
+    ;; itself runs directly on the host (executor stays `exec').
+    (when worktree
+      (unless (featurep 'baton-sodagun)
+        (error "Worktree spawn requires the sodagun CLI (baton-sodagun not loaded)"))
+      (setq directory (cdr (baton-sodagun--add-worktree
+                            worktree (expand-file-name directory) base))))
     (let* ((args (plist-get def :args))
            (command (if args
                         (mapconcat #'identity
@@ -267,7 +281,12 @@ prompt is shown unless a prefix argument is given."
           (require 'baton-monet)
           (add-hook 'monet-mode-hook #'baton--on-monet-mode)
           (when (and (boundp 'monet-mode) monet-mode)
-            (baton-monet-setup))))
+            (baton-monet-setup)))
+        ;; Wire sodagun integration (worktree/sandbox spawning) when the CLI
+        ;; is installed.  Loading the module is enough: it registers its
+        ;; executor methods, and the transient flags key off the feature.
+        (when (executable-find "sodagun")
+          (require 'baton-sodagun nil t)))
     (baton--teardown-hooks)
     (baton-modeline-mode -1)
     (when (featurep 'baton-monet)
@@ -304,6 +323,31 @@ prompt is shown unless a prefix argument is given."
   :reader (lambda (_prompt _initial-input _history)
             (read-directory-name "Directory: ")))
 
+(defun baton--sodagun-usable-p ()
+  "Return non-nil when sodagun-backed spawn options should be offered."
+  (and (featurep 'baton-sodagun) (baton-sodagun-available-p)))
+
+(transient-define-infix baton--worktree-infix ()
+  "Branch name for a sodagun worktree to run the next session in."
+  :argument "--worktree="
+  :class 'transient-option
+  :key "-w"
+  :description "Worktree branch (this spawn)"
+  :if #'baton--sodagun-usable-p
+  :reader (lambda (prompt _initial-input _history)
+            (read-string prompt)))
+
+(transient-define-infix baton--base-infix ()
+  "Base ref for the worktree branch.
+When unset, sodagun's own default base ref applies."
+  :argument "--base="
+  :class 'transient-option
+  :key "-B"
+  :description "Worktree base ref"
+  :if #'baton--sodagun-usable-p
+  :reader (lambda (prompt _initial-input _history)
+            (read-string prompt)))
+
 (transient-define-infix baton--default-agent-infix ()
   "Set the persistent default agent for `baton-new'."
   :class 'transient-lisp-variable
@@ -323,6 +367,8 @@ prompt is shown unless a prefix argument is given."
     ("-a" baton--agent-infix)
     ("-n" baton--name-infix)
     ("-D" baton--directory-infix)
+    ("-w" baton--worktree-infix)
+    ("-B" baton--base-infix)
     ("n" "New session"        baton-new)
     ("k" "Kill session"       baton-kill)
     ("K" "Kill all"           baton-kill-all)]
