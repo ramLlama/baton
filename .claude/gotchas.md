@@ -55,3 +55,13 @@
 27. **Sandbox env travels via attach `--env`, never the host `process-environment`.** The `sodagun` resolve returns `:extra-env nil`; the agent's `:env` strings are baked into the `sodagun sandbox attach … --env K=V …` command instead, so they reach the *guest* process. Don't try to deliver sandbox env through `:extra-env` (that prepends to the host environment, which the in-guest agent never sees).
 
 28. **The forwarder-vs-agent-connect race is accepted.** Each port's in-guest socat forwarder is started before the agent attaches, but socat's listen setup races the agent's first connect. In practice the agent boots much slower, so it's a non-issue; a lost race surfaces in-guest as connection-refused on `127.0.0.1:PORT`. No explicit readiness handshake is done.
+
+29. **Monet-in-sandbox needs the IDE lockfile bind-mounted into the guest.** Claude discovers the MCP server through the lockfile `~/.claude/ide/<Pm>.lock` (auth token + workspaceFolders) written on the *host*. The sandbox's `sodagun.toml` must bind-mount the host `~/.claude/ide` read-only into the guest at the same home-relative path, or Claude-in-guest never finds the server. This is the user's sodagun.toml responsibility, **not** baton's — baton writes the host-side lockfile via monet but does not provision the guest mount.
+
+30. **The lockfile records the HOST worktree path, which the guest doesn't have.** The lockfile's `workspaceFolders` records the host worktree path (`R`/`W`), but the guest sees that worktree at the sandbox `working_dir` (e.g. `/workspace`). If Claude validates the folder path, this mismatch may need a guest-side rewrite. **Unverified — flagged as a known risk.**
+
+31. **The guest image must ship `socat` and `python3`.** The per-port forwarders run `socat` via `sodagun sandbox exec` inside the guest, and monet's Claude hook script is a stdlib-only `python3` script that runs in-guest. Both must be present in the user's sandbox image — provisioning them is the user's image responsibility, not baton's.
+
+32. **Guest Claude credentials/config are user-provisioned.** Claude's in-guest config and credentials (`~/.claude*`, API keys) come from the user's `sodagun.toml` volumes/secrets — entirely out of baton scope. Baton injects only the four monet env vars via attach `--env`.
+
+33. **`host.microsandbox.internal` reaches host `127.0.0.1`-bound servers (verified).** The forwarders bridge to `host.microsandbox.internal:PORT`; empirically verified (2026-06-10): an in-guest `curl http://host.microsandbox.internal:PORT` returned 200 from a host server bound to `127.0.0.1`, with the matching `allow@host:tcp:PORT` rule in place. monet's servers can stay loopback-bound.

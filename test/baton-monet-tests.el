@@ -299,6 +299,29 @@ Even when the terminal output matches a different waiting pattern (e.g.
         (should (eq baton-monet--saved-claude-trigger :periodic))
         (should (eq baton-monet--saved-claude-status-fn original-fn))))))
 
+(ert-deftest baton-test-monet-setup-registers-env-functions ()
+  "`baton-monet-setup' registers both env-functions on claude-code, in order.
+The order matters for the sandbox path: `monet-start-server-function'
+contributes the MCP + hook :ports (driving the executor's forwarders)
+and its :env leads the attach --env list, followed by the
+MONET_CTX_baton_session injection."
+  (skip-unless (featurep 'monet))
+  (baton-test-with-clean-state
+    (baton-define-agent :name 'claude-code :command "claude"
+                        :status-function-trigger :periodic)
+    (let ((monet--tool-registry nil)
+          (monet--enabled-sets '(:core :simple-diff))
+          (monet-open-diff-tool-schema nil)
+          (monet--claude-hook-functions nil)
+          (baton-monet--saved-claude-status-fn nil)
+          (baton-monet--saved-claude-trigger nil))
+      (baton-monet-setup)
+      (let ((env-fns (plist-get (gethash 'claude-code baton-agents)
+                                :env-functions)))
+        (should (equal env-fns
+                       (list #'monet-start-server-function
+                             #'baton-monet--session-env-function)))))))
+
 (ert-deftest baton-test-monet-teardown-restores-claude ()
   "`baton-monet--teardown' restores claude-code's original trigger and status-fn."
   (skip-unless (featurep 'monet))

@@ -112,8 +112,19 @@ For `:on-event` agents (claude-code when monet is active), status is driven by m
 
 ### Setup and Teardown
 
-`baton-monet-setup` saves claude-code's original `:status-function` and `:status-function-trigger`, then switches claude-code to `:on-event` trigger with `baton-monet--hook-status-fn`. It also registers the env-function and hook handler.
+`baton-monet-setup` saves claude-code's original `:status-function` and `:status-function-trigger`, then switches claude-code to `:on-event` trigger with `baton-monet--hook-status-fn`. It also registers the hook handler and **two** env-functions on claude-code, **in order**: `monet-start-server-function` first, then `baton-monet--session-env-function`. The order is load-bearing for the sandbox path — `monet-start-server-function` contributes the MCP + hook `:ports` that drive the executor's forwarders, and its `:env` leads the attach `--env` list, followed by the `MONET_CTX_baton_session` injection. (`baton-test-monet-setup-registers-env-functions` pins this order.)
 
 `baton-monet--teardown` (called when `baton-mode` is disabled) reverses all of this: deregisters the hook handler, removes the review-bar hook, clears the "r" keybinding, and restores claude-code's original status-function and trigger.
 
 `baton-mode` automatically calls `baton-monet-setup` when monet is loaded (via `with-eval-after-load`) and calls `baton-monet--teardown` on disable when `baton-monet` is loaded.
+
+### Monet in the Sandbox (Composed Flow)
+
+Monet's event-driven status and `openDiff` review both work for a sandboxed claude-code session, with **no regex fallback** — the two env-functions above feed the `sodagun` executor's `:ports`/`:env` machinery (see [Sandbox Spawn](#sandbox-spawn-the-sodagun-executor)). For a sandboxed claude-code session named `N` with monet active:
+
+1. The `sodagun` executor's resolve creates worktree `W` (rootdir `R`).
+2. `baton-executor--agent-env` runs the env-functions once against `W`. `monet-start-server-function` starts the per-session MCP websocket server on `127.0.0.1:Pm` and the shared HTTP hook server on `127.0.0.1:Ph`, returning `(:env ("ENABLE_IDE_INTEGRATION=t" "CLAUDE_CODE_SSE_PORT=Pm" "MONET_HOOK_PORT=Ph") :ports (Pm Ph))`; `baton-monet--session-env-function` then appends `MONET_CTX_baton_session=N`.
+3. The sandbox starts with `--net-rule allow@host:tcp:Pm --net-rule allow@host:tcp:Ph`; one in-guest socat forwarder per port bridges guest `127.0.0.1:Pm`/`:Ph` → `host.microsandbox.internal:Pm`/`:Ph`.
+4. The attach command injects all four env vars via `--env`. Claude-in-guest dials `ws://127.0.0.1:Pm` for diff review, and the hook script POSTs to `http://127.0.0.1:Ph/hook` for status — both reach host monet through the bridges.
+
+This composition relies on host-side guest/workspace provisioning (the lockfile bind-mount, `socat`/`python3` in the image, `host.microsandbox.internal` reachability) that is the **user's sodagun.toml + image responsibility, not baton's** — see [gotchas.md](gotchas.md) items 29–33.

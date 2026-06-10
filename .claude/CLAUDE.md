@@ -9,7 +9,7 @@ Baton is an Emacs Lisp package for managing multiple AI coding agents (Claude Co
 - **Language**: Emacs Lisp (lexical-binding throughout)
 - **Emacs minimum**: 29.1
 - **Required dependency**: vterm (>= 0.0.2) -- agents run in vterm buffers
-- **Optional dependency**: monet (sibling repo at `../monet`) -- diff review integration
+- **Optional dependency**: monet (sibling repo at `../monet`) -- diff review integration (works inside sodagun sandboxes via the executor's port forwarders, given host-side guest provisioning)
 - **Optional CLI**: sodagun (external binary on `exec-path`) -- git-worktree-based sessions and microVM sandbox sessions (the `sodagun` executor)
 - **Testing**: ERT (Emacs Regression Testing framework)
 - **Build**: GNU Make (`make checkdoc`, `make compile`, `make test`)
@@ -109,5 +109,5 @@ M-x ert RET baton-test-session-create-returns-struct RET
 
 - **[domain-model.md](domain-model.md)** -- Session struct, agent registry, status observation, unread tracking, alert backends, hooks
 - **[architecture.md](architecture.md)** -- Output watcher algorithm, notification surface, monet integration
-- **[gotchas.md](gotchas.md)** -- Critical idiosyncrasies and non-obvious behaviors (28 items)
+- **[gotchas.md](gotchas.md)** -- Critical idiosyncrasies and non-obvious behaviors (33 items)
 - **[commands.md](commands.md)** -- User commands and transient dispatch keybindings
