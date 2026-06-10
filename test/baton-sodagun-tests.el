@@ -95,6 +95,18 @@ The rootdir path is bound to `rootdir' within BODY."
                        (list "git" "add-worktree" "feat" "/repo"
                              "--base" "origin/dev")))))))
 
+(ert-deftest baton-test-sodagun-add-worktree-runs-created-hook ()
+  "The worktree-created hook fires with (WORKTREE-PATH REPO BRANCH).
+It runs only after the worktree passes validation."
+  (baton-sodagun-test--with-rootdir "/work/feat"
+    (let (hook-args)
+      (cl-letf (((symbol-function 'baton-sodagun--run)
+                 (lambda (&rest _args) `((status . "ok") (rootdir . ,rootdir)))))
+        (let ((baton-sodagun-worktree-created-hook
+               (list (lambda (&rest args) (setq hook-args args)))))
+          (baton-sodagun--add-worktree "feat" "/repo" "origin/dev")
+          (should (equal hook-args '("/work/feat" "/repo" "feat"))))))))
+
 (ert-deftest baton-test-sodagun-add-worktree-errors-without-metadata ()
   "`baton-sodagun--add-worktree' fails fast when sodagun.json is missing."
   (let ((rootdir (make-temp-file "baton-sodagun-test-empty-" t)))
@@ -114,24 +126,36 @@ The rootdir path is bound to `rootdir' within BODY."
 
 (ert-deftest baton-test-sodagun-attach-command-bare ()
   "`baton-sodagun--attach-command' without env wraps the agent command."
-  (should (equal (baton-sodagun--attach-command "/root" "claude")
-                 "sodagun sandbox attach /root -- claude")))
+  (cl-letf (((symbol-function 'baton-sodagun--executable) (lambda () "sodagun")))
+    (should (equal (baton-sodagun--attach-command "/root" "claude")
+                   "sodagun sandbox attach /root -- claude"))))
 
 (ert-deftest baton-test-sodagun-attach-command-env ()
   "`baton-sodagun--attach-command' injects each env string via --env."
-  (should (equal (baton-sodagun--attach-command "/root" "claude"
-                                                :env '("A=1" "B=2"))
-                 (concat "sodagun sandbox attach /root"
-                         " --env " (shell-quote-argument "A=1")
-                         " --env " (shell-quote-argument "B=2")
-                         " -- claude"))))
+  (cl-letf (((symbol-function 'baton-sodagun--executable) (lambda () "sodagun")))
+    (should (equal (baton-sodagun--attach-command "/root" "claude"
+                                                  :env '("A=1" "B=2"))
+                   (concat "sodagun sandbox attach /root"
+                           " --env " (shell-quote-argument "A=1")
+                           " --env " (shell-quote-argument "B=2")
+                           " -- claude")))))
 
 (ert-deftest baton-test-sodagun-attach-command-quotes ()
   "`baton-sodagun--attach-command' shell-quotes the rootdir and env values."
-  (let ((cmd (baton-sodagun--attach-command "/my root" "claude"
-                                            :env '("MSG=hello world"))))
-    (should (string-match-p (regexp-quote (shell-quote-argument "/my root")) cmd))
-    (should (string-match-p (regexp-quote (shell-quote-argument "MSG=hello world")) cmd))))
+  (cl-letf (((symbol-function 'baton-sodagun--executable) (lambda () "sodagun")))
+    (let ((cmd (baton-sodagun--attach-command "/my root" "claude"
+                                              :env '("MSG=hello world"))))
+      (should (string-match-p (regexp-quote (shell-quote-argument "/my root")) cmd))
+      (should (string-match-p (regexp-quote (shell-quote-argument "MSG=hello world")) cmd)))))
+
+(ert-deftest baton-test-sodagun-attach-command-absolute-binary ()
+  "`baton-sodagun--attach-command' uses the absolute sodagun path.
+The attach string runs through /bin/sh -c with Emacs's own PATH, which
+may not include the directory the variable `exec-path' found sodagun in."
+  (cl-letf (((symbol-function 'baton-sodagun--executable)
+             (lambda () "/home/u/.cargo/bin/sodagun")))
+    (should (string-prefix-p "/home/u/.cargo/bin/sodagun sandbox attach"
+                             (baton-sodagun--attach-command "/root" "claude")))))
 
 ;;; ─── sandbox start tests ────────────────────────────────────────────────────
 
@@ -149,6 +173,20 @@ The rootdir path is bound to `rootdir' within BODY."
                      '("sandbox" "start" "/root"
                        "--net-rule" "allow@host:tcp:1234"
                        "--net-rule" "allow@host:tcp:5678"))))))
+
+(ert-deftest baton-test-sodagun-sandbox-start-passes-config ()
+  "`baton-sodagun--sandbox-start' forwards CONFIG as --config before rules."
+  (let (run-args)
+    (cl-letf (((symbol-function 'baton-sodagun--run)
+               (lambda (&rest args)
+                 (setq run-args args)
+                 '((status . "ok") (sandbox_name . "sb-1")))))
+      (baton-sodagun--sandbox-start "/root" '("allow@host:tcp:1234")
+                                    "/repo/custom-sodagun.toml")
+      (should (equal run-args
+                     '("sandbox" "start" "/root"
+                       "--config" "/repo/custom-sodagun.toml"
+                       "--net-rule" "allow@host:tcp:1234"))))))
 
 (ert-deftest baton-test-sodagun-sandbox-start-errors-without-name ()
   "`baton-sodagun--sandbox-start' fails fast when no sandbox_name is returned."
@@ -172,8 +210,8 @@ forwarder \"processes\" are the port numbers themselves."
                   (push (list branch repo base) wt-calls)
                   '("/root" . "/work/feat")))
                ((symbol-function 'baton-sodagun--sandbox-start)
-                (lambda (rootdir rules)
-                  (push (list rootdir rules) start-calls)
+                (lambda (rootdir rules &optional config)
+                  (push (list rootdir rules config) start-calls)
                   "sb-1"))
                ((symbol-function 'baton-sodagun--start-forwarder)
                 (lambda (_rootdir port _session-name)
@@ -204,7 +242,7 @@ forwarder \"processes\" are the port numbers themselves."
                                             :env)))
           ;; Sandbox started with one allow@host rule per declared port.
           (should (equal start-calls
-                         '(("/root" ("allow@host:tcp:1234" "allow@host:tcp:5678")))))
+                         '(("/root" ("allow@host:tcp:1234" "allow@host:tcp:5678") nil))))
           ;; One forwarder per port.
           (should (equal (sort fwd-calls #'<) '(1234 5678)))
           ;; Resolve contract: run in the worktree, attach command, no host env.
@@ -220,6 +258,21 @@ forwarder \"processes\" are the port numbers themselves."
             (should (equal (plist-get ws :rootdir) "/root"))
             (should (equal (plist-get ws :sandbox-name) "sb-1"))
             (should (equal (plist-get ws :ports) '(1234 5678)))))))))
+
+(ert-deftest baton-test-sodagun-resolve-passes-config ()
+  "Resolve forwards the stashed :sodagun-config to sandbox start."
+  (baton-test-with-clean-state
+    (baton-sodagun-test--with-executor-stubs
+      (baton-define-agent :name 'sbx-agent :command "cmd"
+                          :status-function-trigger :periodic)
+      (let ((s (baton-session-create :agent 'sbx-agent :command "claude"
+                                     :directory "/repo" :name "sbx-cfg"
+                                     :executor 'sodagun)))
+        (setf (baton--session-metadata s)
+              (list :sodagun-config "/repo/custom-sodagun.toml"))
+        (baton-executor--resolve 'sodagun s)
+        (should (equal start-calls
+                       '(("/root" nil "/repo/custom-sodagun.toml"))))))))
 
 (ert-deftest baton-test-sodagun-resolve-auto-branch ()
   "Sandbox without an explicit branch derives one from the session name."
@@ -389,12 +442,15 @@ session metadata for `baton-executor--resolve' to consume."
                (lambda (&rest _args) (error "Worktree must not be created up front")))
               ((symbol-function 'baton-process-spawn) #'ignore)
               ((symbol-function 'pop-to-buffer) #'ignore))
-      (let ((session (baton-new "sbx-agent" "/repo" nil "feat-x" "origin/dev" t)))
+      (let ((session (baton-new "sbx-agent" "/repo" nil "feat-x" "origin/dev" t
+                                "/repo/custom-sodagun.toml")))
         (should (eq (baton--session-executor session) 'sodagun))
         (should (equal (plist-get (baton--session-metadata session) :sodagun-branch)
                        "feat-x"))
         (should (equal (plist-get (baton--session-metadata session) :sodagun-base)
                        "origin/dev"))
+        (should (equal (plist-get (baton--session-metadata session) :sodagun-config)
+                       (expand-file-name "/repo/custom-sodagun.toml")))
         ;; Directory stays the repo until resolve re-anchors it.
         (should (equal (baton--session-directory session)
                        (expand-file-name "/repo")))))))

@@ -197,7 +197,8 @@ then `default-directory'."
      (t       default-directory))))
 
 ;;;###autoload
-(defun baton-new (agent-name directory &optional name worktree base sandbox)
+(defun baton-new (agent-name directory &optional name worktree base sandbox
+                             config)
   "Spawn a new agent session.
 AGENT-NAME is a string naming the agent (e.g. \"claude-code\").
 DIRECTORY is the working directory for the session; auto-detected from the
@@ -210,7 +211,9 @@ and the session runs in the worktree instead of DIRECTORY.
 When SANDBOX is non-nil the session runs inside a sodagun sandbox (the
 `sodagun' executor); the worktree and sandbox are then created lazily at
 spawn time, and a worktree is implied even without WORKTREE (the branch
-name is derived from the session name).
+name is derived from the session name).  CONFIG, only valid with SANDBOX,
+is an alternative sodagun.toml path for the sandbox, overriding the
+worktree's own config.
 When `baton-default-agent' is set, AGENT-NAME defaults to that agent and no
 prompt is shown unless a prefix argument is given."
   (interactive
@@ -222,6 +225,7 @@ prompt is shown unless a prefix argument is given."
           (worktree-from-args  (and args (transient-arg-value "--worktree="  args)))
           (base-from-args      (and args (transient-arg-value "--base="      args)))
           (sandbox-from-args   (and args (transient-arg-value "--sandbox"    args)))
+          (config-from-args    (and args (transient-arg-value "--config="    args)))
           (agent-name (or agent-from-args
                           (and baton-default-agent
                                (not current-prefix-arg)
@@ -239,13 +243,15 @@ prompt is shown unless a prefix argument is given."
                              (read-directory-name "Directory: ")
                            (baton--detect-directory)))))
      (list agent-name directory name worktree-from-args base-from-args
-           sandbox-from-args)))
+           sandbox-from-args config-from-args)))
   (let* ((agent (intern agent-name))
          (def (gethash agent baton-agents)))
     (unless def
       (error "Unknown agent: %s" agent-name))
     (when (and (or worktree sandbox) (not (featurep 'baton-sodagun)))
       (error "Worktree/sandbox spawn requires the sodagun CLI (baton-sodagun not loaded)"))
+    (when (and config (not sandbox))
+      (error "A sodagun config (-c) is only valid for sandbox spawns (-s)"))
     ;; Worktree without sandbox: resolve the directory up front; the session
     ;; itself runs directly on the host (executor stays `exec').  With
     ;; sandbox, the sodagun executor creates worktree + sandbox at spawn.
@@ -266,9 +272,11 @@ prompt is shown unless a prefix argument is given."
                      :name name
                      :executor (if sandbox 'sodagun 'exec))))
       (when sandbox
-        ;; Stash worktree intent for the executor's resolve to consume.
+        ;; Stash worktree/sandbox intent for the executor's resolve to consume.
         (setf (baton--session-metadata session)
-              (list :sodagun-branch worktree :sodagun-base base)))
+              (list :sodagun-branch worktree
+                    :sodagun-base base
+                    :sodagun-config (and config (expand-file-name config)))))
       (baton-process-spawn session)
       (when-let* ((buf (baton--session-buffer session)))
         (pop-to-buffer buf))
@@ -360,6 +368,19 @@ When unset, sodagun's own default base ref applies."
   :reader (lambda (prompt _initial-input _history)
             (read-string prompt)))
 
+(transient-define-infix baton--sodagun-config-infix ()
+  "Alternative sodagun.toml for the sandbox of the next `baton-new'.
+When unset, the worktree's own sodagun.toml applies.  Useful when the
+in-repo config has uncommitted changes that a fresh worktree's checkout
+would not include."
+  :argument "--config="
+  :class 'transient-option
+  :key "-c"
+  :description "Sandbox sodagun.toml"
+  :if #'baton--sodagun-usable-p
+  :reader (lambda (_prompt _initial-input _history)
+            (read-file-name "sodagun.toml: " nil nil t)))
+
 (transient-define-infix baton--default-agent-infix ()
   "Set the persistent default agent for `baton-new'."
   :class 'transient-lisp-variable
@@ -382,6 +403,7 @@ When unset, sodagun's own default base ref applies."
     ("-w" baton--worktree-infix)
     ("-B" baton--base-infix)
     ("-s" "Sandbox (this spawn)" "--sandbox" :if baton--sodagun-usable-p)
+    ("-c" baton--sodagun-config-infix)
     ("n" "New session"        baton-new)
     ("k" "Kill session"       baton-kill)
     ("K" "Kill all"           baton-kill-all)]

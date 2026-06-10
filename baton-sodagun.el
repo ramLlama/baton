@@ -29,6 +29,13 @@
   "Return non-nil when the sodagun CLI is available."
   (and (executable-find "sodagun") t))
 
+(defun baton-sodagun--executable ()
+  "Return the absolute path of the sodagun binary, or \"sodagun\".
+Commands run through the terminal's /bin/sh see Emacs's PATH environment
+variable, which may not cover the variable `exec-path' — so shell command
+strings must embed the absolute path."
+  (or (executable-find "sodagun") "sodagun"))
+
 ;;; CLI invocation
 
 (defun baton-sodagun--run (&rest args)
@@ -52,6 +59,16 @@ when sodagun exits non-zero or prints no JSON."
       (json-parse-buffer :object-type 'alist))))
 
 ;;; Worktrees
+
+(defcustom baton-sodagun-worktree-created-hook nil
+  "Hook called after a sodagun worktree is created.
+Each function is called with three arguments: WORKTREE-PATH (the
+checked-out worktree), REPO (the source repository the worktree was
+created from), and BRANCH (the new branch name).  Useful for
+site-specific post-creation setup — e.g. propagating direnv trust from
+the repository's .envrc to the freshly created worktree."
+  :type 'hook
+  :group 'baton)
 
 (defun baton-sodagun--add-worktree (branch repo &optional base)
   "Create a sodagun worktree on a new BRANCH of REPO, optionally from BASE.
@@ -77,6 +94,8 @@ checked-out worktree inside it."
     (unless (and (file-name-absolute-p rootdir)
                  (file-name-absolute-p worktree-path))
       (error "Sodagun returned non-absolute paths: %s, %s" rootdir worktree-path))
+    (run-hook-with-args 'baton-sodagun-worktree-created-hook
+                        worktree-path repo branch)
     (cons rootdir worktree-path)))
 
 ;;; Sandboxes
@@ -94,12 +113,16 @@ consumed by its teardown.")
   "Return a guest-to-host egress net-rule SPEC for each port in PORTS."
   (mapcar (lambda (port) (format "allow@host:tcp:%d" port)) ports))
 
-(defun baton-sodagun--sandbox-start (rootdir net-rules)
+(defun baton-sodagun--sandbox-start (rootdir net-rules &optional config)
   "Start the sandbox for workspace ROOTDIR with NET-RULES; return its name.
 NET-RULES are sodagun `--net-rule' SPEC strings appended after the
-workspace config's own rules."
+workspace config's own rules.  CONFIG, when non-nil, is an alternative
+sodagun.toml path passed as --config — overriding the worktree's own
+config (useful when the in-repo config has uncommitted changes the new
+worktree's checkout doesn't have)."
   (let ((result (apply #'baton-sodagun--run
                        `("sandbox" "start" ,rootdir
+                         ,@(when config (list "--config" config))
                          ,@(mapcan (lambda (rule) (list "--net-rule" rule))
                                    net-rules)))))
     (or (alist-get 'sandbox_name result)
@@ -140,7 +163,8 @@ SESSION-NAME labels the process."
 ENV is a list of \"VAR=VALUE\" strings injected into the in-guest command
 via repeated --env flags.  AGENT-COMMAND is embedded verbatim after the
 -- separator (it is already a complete shell command string)."
-  (concat "sodagun sandbox attach "
+  (concat (shell-quote-argument (baton-sodagun--executable))
+          " sandbox attach "
           (shell-quote-argument rootdir)
           (mapconcat (lambda (kv) (concat " --env " (shell-quote-argument kv)))
                      env "")
@@ -192,7 +216,8 @@ forwarders killed, worktree kept) before the error propagates."
                                    :env env
                                    :sandbox-name
                                    (baton-sodagun--sandbox-start
-                                    rootdir (baton-sodagun--net-rules ports)))
+                                    rootdir (baton-sodagun--net-rules ports)
+                                    (plist-get meta :sodagun-config)))
           ;; Forwarders start before the agent attaches, but socat's listen
           ;; setup races the agent's first connect; in practice the agent
           ;; boots much slower.  A lost race surfaces in-guest as connection
