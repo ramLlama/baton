@@ -33,14 +33,13 @@ When the session's executor is `sodagun`, `baton-process-spawn` calls `baton-exe
 2. **Worktree** — `baton-sodagun--add-worktree` with the stashed branch/base (branch auto-derived as `baton/<session-name>` when unset).
 3. **Agent env once** — `baton-executor--agent-env` against the worktree path → `:env` strings + `:ports` (evaluated exactly once, same as `exec`).
 4. **Net rules** — one `allow@host:tcp:PORT` egress rule per declared port.
-5. **Sandbox start** — `baton-sodagun--sandbox-start` with those net rules; records the returned `sandbox_name`.
-6. **Forwarders** — one in-guest socat forwarder per port (guest `127.0.0.1:PORT` → host alias `:PORT`).
-7. **Re-anchor** — point the session's directory slot at the worktree.
-8. **Attach command** — return `(:directory WORKTREE :command "sodagun sandbox attach …--env K=V… -- <agent-cmd>" :extra-env nil)`. Env reaches the agent via attach `--env`, **not** the host `process-environment`; the attach command is launched later by `baton-process-spawn` in the terminal backend like any other session command.
+5. **Sandbox start** — `baton-sodagun--sandbox-start` with those net rules (plus `--config` when a `:sodagun-config` was stashed); records the returned `sandbox_name`.
+6. **Re-anchor** — point the session's directory slot at the worktree.
+7. **Attach command** — return `(:directory WORKTREE :command "sodagun sandbox attach …--env K=V… -- sh -c 'socat … & … exec <agent-cmd>'" :extra-env nil)`. The sandbox accepts only **one concurrent connection**, so the per-port socat forwarders are backgrounded by a wrapper shell **on the attach connection itself**, which then `exec`s the agent (see gotcha 28). Env reaches the agent via attach `--env`, **not** the host `process-environment`; the attach command is launched later by `baton-process-spawn` in the terminal backend like any other session command.
 
-If any step signals mid-resolve, a `condition-case` runs `baton-executor--teardown` on the partial state (forwarders killed, sandbox removed only if it started, worktree kept) and re-signals.
+If any step signals mid-resolve, a `condition-case` runs `baton-executor--teardown` on the partial state (sandbox removed only if it started, worktree kept) and re-signals.
 
-**Teardown flow.** On `baton-session-killed-hook`, `baton-executor--teardown-on-kill` dispatches to the `sodagun` teardown method: kill the forwarders, then issue an **async** `sodagun sandbox remove` (only when a `sandbox-name` was recorded), keep the worktree, and drop the registry entry. Idempotent — the entry is removed on the first call. The agent's attach process dies with the terminal buffer before this fires, so the sandbox has no live users when removal runs.
+**Teardown flow.** On `baton-session-killed-hook`, `baton-executor--teardown-on-kill` dispatches to the `sodagun` teardown method: issue an **async** `sodagun sandbox remove` (only when a `sandbox-name` was recorded), keep the worktree, and drop the registry entry. Idempotent — the entry is removed on the first call. The agent's attach process dies with the terminal buffer before this fires (freeing the sandbox's single connection), and the in-guest socats die with the sandbox — nothing to kill host-side.
 
 ## Output Watcher
 
@@ -124,7 +123,7 @@ Monet's event-driven status and `openDiff` review both work for a sandboxed clau
 
 1. The `sodagun` executor's resolve creates worktree `W` (rootdir `R`).
 2. `baton-executor--agent-env` runs the env-functions once against `W`. `monet-start-server-function` starts the per-session MCP websocket server on `127.0.0.1:Pm` and the shared HTTP hook server on `127.0.0.1:Ph`, returning `(:env ("ENABLE_IDE_INTEGRATION=t" "CLAUDE_CODE_SSE_PORT=Pm" "MONET_HOOK_PORT=Ph") :ports (Pm Ph))`; `baton-monet--session-env-function` then appends `MONET_CTX_baton_session=N`.
-3. The sandbox starts with `--net-rule allow@host:tcp:Pm --net-rule allow@host:tcp:Ph`; one in-guest socat forwarder per port bridges guest `127.0.0.1:Pm`/`:Ph` → `host.microsandbox.internal:Pm`/`:Ph`.
-4. The attach command injects all four env vars via `--env`. Claude-in-guest dials `ws://127.0.0.1:Pm` for diff review, and the hook script POSTs to `http://127.0.0.1:Ph/hook` for status — both reach host monet through the bridges.
+3. The sandbox starts with `--net-rule allow@host:tcp:Pm --net-rule allow@host:tcp:Ph`.
+4. The attach command injects all four env vars via `--env`, and its in-guest wrapper shell backgrounds one socat per port (guest `127.0.0.1:Pm`/`:Ph` → `host.microsandbox.internal:Pm`/`:Ph`) before `exec`ing claude — all on the single attach connection. Claude-in-guest dials `ws://127.0.0.1:Pm` for diff review, and the hook script POSTs to `http://127.0.0.1:Ph/hook` for status — both reach host monet through the bridges. (Bridge path verified end-to-end 2026-06-10: in-guest curl through the socat → host loopback listener returned 200.)
 
 This composition relies on host-side guest/workspace provisioning (the lockfile bind-mount, `socat`/`python3` in the image, `host.microsandbox.internal` reachability) that is the **user's sodagun.toml + image responsibility, not baton's** — see [gotchas.md](gotchas.md) items 29–33.

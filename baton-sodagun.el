@@ -15,9 +15,12 @@
 ;;
 ;; The sandbox path: resolve creates a worktree, evaluates the agent's
 ;; env-functions once against it, starts the sandbox with an allow@host
-;; egress rule per declared port, bridges each port with an in-guest socat
-;; forwarder (the guest's 127.0.0.1:PORT dials the host alias), and attaches
-;; the agent via `sodagun sandbox attach ... --env K=V ... -- CMD'.
+;; egress rule per declared port, and attaches the agent via
+;; `sodagun sandbox attach ... --env K=V ... -- sh -c "socat ... & exec CMD"'.
+;; Each declared port is bridged by an in-guest socat (the guest's
+;; 127.0.0.1:PORT dials the host alias) backgrounded on the attach
+;; connection itself — the sandbox accepts only one concurrent connection,
+;; so forwarders cannot be separate exec clients.
 ;; Killing the session removes the sandbox but keeps the worktree.
 
 ;;; Code:
@@ -105,9 +108,9 @@ checked-out worktree inside it."
 
 (defvar baton-sodagun--workspaces (make-hash-table :test 'equal)
   "Hash table mapping session names to their sodagun workspace state.
-Each value is a plist (:rootdir :worktree-path :sandbox-name :ports :env
-:forwarder-procs), recorded by the `sodagun' executor's resolve and
-consumed by its teardown.")
+Each value is a plist (:rootdir :worktree-path :sandbox-name :ports
+:env), recorded by the `sodagun' executor's resolve and consumed by its
+teardown.")
 
 (defun baton-sodagun--net-rules (ports)
   "Return a guest-to-host egress net-rule SPEC for each port in PORTS."
@@ -144,31 +147,44 @@ error on it)."
                  (message "baton-sodagun: sandbox remove for %s (%s) failed (exit %d)"
                           session-name rootdir (process-exit-status proc))))))
 
-(defun baton-sodagun--start-forwarder (rootdir port session-name)
-  "Bridge guest PORT to the host for ROOTDIR's sandbox; return the process.
-Runs socat inside the guest (via `sodagun sandbox exec'): it listens on the
-guest's 127.0.0.1:PORT and dials `baton-sodagun--host-alias':PORT, so
-in-guest clients reach the host service at the address they expect.
-SESSION-NAME labels the process."
-  (make-process
-   :name (format "baton-sodagun-fwd-%s-%d" session-name port)
-   :command (list "sodagun" "sandbox" "exec" rootdir
-                  "socat"
-                  (format "TCP-LISTEN:%d,bind=127.0.0.1,reuseaddr,fork" port)
-                  (format "TCP:%s:%d" baton-sodagun--host-alias port))
-   :noquery t))
+(defun baton-sodagun--guest-forward-command (port)
+  "Return the in-guest socat invocation bridging PORT to the host.
+It listens on the guest's 127.0.0.1:PORT and dials
+`baton-sodagun--host-alias':PORT, so in-guest clients reach the host
+service at the address they expect."
+  (format "socat TCP-LISTEN:%d,bind=127.0.0.1,reuseaddr,fork TCP:%s:%d"
+          port baton-sodagun--host-alias port))
 
-(cl-defun baton-sodagun--attach-command (rootdir agent-command &key env)
+(cl-defun baton-sodagun--attach-command (rootdir agent-command &key env ports)
   "Build the shell command attaching AGENT-COMMAND to ROOTDIR's sandbox.
 ENV is a list of \"VAR=VALUE\" strings injected into the in-guest command
-via repeated --env flags.  AGENT-COMMAND is embedded verbatim after the
--- separator (it is already a complete shell command string)."
+via repeated --env flags.  AGENT-COMMAND is embedded verbatim (it is
+already a complete shell command string).
+PORTS is a list of host ports to bridge from inside the guest.  The
+sandbox accepts only ONE concurrent connection (microsandbox SDK), so the
+forwarders cannot be separate `sodagun sandbox exec' clients: each port
+gets a backgrounded in-guest socat launched by a wrapper shell on the
+attach connection itself, which then execs AGENT-COMMAND.  The socats are
+orphaned to the guest init and die with the sandbox."
   (concat (shell-quote-argument (baton-sodagun--executable))
           " sandbox attach "
           (shell-quote-argument rootdir)
           (mapconcat (lambda (kv) (concat " --env " (shell-quote-argument kv)))
                      env "")
-          " -- " agent-command))
+          " -- "
+          (if ports
+              (concat
+               "sh -c "
+               (shell-quote-argument
+                (concat
+                 "command -v socat >/dev/null"
+                 " || echo baton: socat missing in guest, port forwarding disabled; "
+                 (mapconcat (lambda (port)
+                              (concat (baton-sodagun--guest-forward-command port)
+                                      " & "))
+                            ports "")
+                 "exec " agent-command)))
+            agent-command)))
 
 ;;; `sodagun' executor
 
@@ -186,14 +202,16 @@ Creates a worktree (branch/base from the session's create-time
 :sodagun-branch/:sodagun-base metadata; branch auto-derived from the
 session name when absent), evaluates the agent env once against the
 worktree, starts the sandbox with an allow@host rule per declared port,
-starts a socat forwarder per port, and returns the attach command as the
-session's :command — `baton-process-spawn' then launches it in the
-terminal backend like any other session command, so the attach (and the
-agent inside it) starts when the terminal spawns.
+and returns the attach command as the session's :command —
+`baton-process-spawn' then launches it in the terminal backend like any
+other session command, so the attach (and the agent inside it) starts
+when the terminal spawns.  Port forwarders ride the attach connection
+as in-guest socats (see `baton-sodagun--attach-command') because the
+sandbox accepts only one concurrent connection.
 Env reaches the agent via attach --env, not the host environment.
 Side effects register incrementally in `baton-sodagun--workspaces'; on a
 mid-resolve failure the partial state is torn down (sandbox removed,
-forwarders killed, worktree kept) before the error propagates."
+worktree kept) before the error propagates."
   (let ((name (baton--session-name session)))
     (when (gethash name baton-sodagun--workspaces)
       (error "Sodagun workspace already registered for session %s" name))
@@ -218,39 +236,29 @@ forwarders killed, worktree kept) before the error propagates."
                                    (baton-sodagun--sandbox-start
                                     rootdir (baton-sodagun--net-rules ports)
                                     (plist-get meta :sodagun-config)))
-          ;; Forwarders start before the agent attaches, but socat's listen
-          ;; setup races the agent's first connect; in practice the agent
-          ;; boots much slower.  A lost race surfaces in-guest as connection
-          ;; refused on 127.0.0.1:PORT.
-          (dolist (port ports)
-            (let ((proc (baton-sodagun--start-forwarder rootdir port name))
-                  (ws (gethash name baton-sodagun--workspaces)))
-              (baton-sodagun--register name :forwarder-procs
-                                       (cons proc (plist-get ws :forwarder-procs)))))
           ;; Re-anchor the session to the worktree so directory-based lookups
           ;; (and the status buffer) reflect where the agent actually works.
           (setf (baton--session-directory session) worktree-path)
           (list :directory worktree-path
                 :command (baton-sodagun--attach-command
-                          rootdir (baton--session-command session) :env env)
+                          rootdir (baton--session-command session)
+                          :env env :ports ports)
                 :extra-env nil))
       (error
        (baton-executor--teardown 'sodagun session)
        (signal (car err) (cdr err))))))
 
 (cl-defmethod baton-executor--teardown ((_executor (eql sodagun)) session)
-  "Remove SESSION's sandbox and kill its forwarders; keep the worktree.
+  "Remove SESSION's sandbox; keep the worktree on disk.
 The agent's attach process dies with the terminal buffer before the
-killed-hook fires, and the forwarders are killed here first, so the
-sandbox has no users left when the removal is issued.  Tolerates
-partially-resolved state: the sandbox is only removed when it was
-actually started.  Idempotent: the workspace registry entry is removed
-on the first call, making subsequent calls no-ops."
+killed-hook fires (freeing the sandbox's single connection), and the
+in-guest socat forwarders die with the sandbox itself — nothing to kill
+host-side.  Tolerates partially-resolved state: the sandbox is only
+removed when it was actually started.  Idempotent: the workspace
+registry entry is removed on the first call, making subsequent calls
+no-ops."
   (when-let* ((ws (gethash (baton--session-name session)
                            baton-sodagun--workspaces)))
-    (dolist (proc (plist-get ws :forwarder-procs))
-      (when (process-live-p proc)
-        (delete-process proc)))
     (when (plist-get ws :sandbox-name)
       (baton-sodagun--remove-sandbox (plist-get ws :rootdir)
                                      (baton--session-name session)))

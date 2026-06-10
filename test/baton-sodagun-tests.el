@@ -157,6 +157,42 @@ may not include the directory the variable `exec-path' found sodagun in."
     (should (string-prefix-p "/home/u/.cargo/bin/sodagun sandbox attach"
                              (baton-sodagun--attach-command "/root" "claude")))))
 
+(ert-deftest baton-test-sodagun-attach-command-ports-wrap ()
+  "With :ports, the in-guest command backgrounds one socat per port.
+The sandbox accepts a single concurrent connection, so the forwarders
+must ride the attach connection and the agent runs via exec in the same
+wrapper shell."
+  (cl-letf (((symbol-function 'baton-sodagun--executable) (lambda () "sodagun")))
+    (let ((cmd (baton-sodagun--attach-command "/root" "claude"
+                                              :env '("A=1")
+                                              :ports '(1234 5678))))
+      ;; Still a single attach invocation with env.
+      (should (string-prefix-p "sodagun sandbox attach /root --env" cmd))
+      ;; The guest payload is one sh -c token (host-quoted as a whole).
+      (should (string-match-p " -- sh -c " cmd))
+      ;; One socat bridge per port, backgrounded, then exec the agent —
+      ;; matched in their host-quoted form.
+      (dolist (port '(1234 5678))
+        (should (string-match-p
+                 (regexp-quote
+                  (shell-quote-argument (baton-sodagun--guest-forward-command port)))
+                 cmd)))
+      (should (string-match-p
+               (regexp-quote (shell-quote-argument "exec claude")) cmd)))))
+
+(ert-deftest baton-test-sodagun-guest-forward-command ()
+  "The in-guest forwarder bridges guest loopback PORT to the host alias."
+  (should (equal (baton-sodagun--guest-forward-command 4321)
+                 (concat "socat TCP-LISTEN:4321,bind=127.0.0.1,reuseaddr,fork"
+                         " TCP:host.microsandbox.internal:4321"))))
+
+(ert-deftest baton-test-sodagun-attach-command-no-ports-no-wrap ()
+  "Without :ports the agent command is attached directly (no wrapper shell)."
+  (cl-letf (((symbol-function 'baton-sodagun--executable) (lambda () "sodagun")))
+    (let ((cmd (baton-sodagun--attach-command "/root" "claude" :ports nil)))
+      (should (string-suffix-p " -- claude" cmd))
+      (should-not (string-match-p "socat" cmd)))))
+
 ;;; ─── sandbox start tests ────────────────────────────────────────────────────
 
 (ert-deftest baton-test-sodagun-sandbox-start-passes-rules ()
@@ -198,13 +234,12 @@ may not include the directory the variable `exec-path' found sodagun in."
 
 (defmacro baton-sodagun-test--with-executor-stubs (&rest body)
   "Run BODY with the sodagun CLI side effects stubbed and recorded.
-Binds `wt-calls', `start-calls', `fwd-calls', and an isolated
-`baton-sodagun--workspaces'.  The stubbed worktree is /root//work/feat;
-forwarder \"processes\" are the port numbers themselves."
+Binds `wt-calls', `start-calls', and an isolated
+`baton-sodagun--workspaces'.  The stubbed worktree is /root//work/feat."
   (declare (indent 0))
-  `(let ((wt-calls nil) (start-calls nil) (fwd-calls nil)
+  `(let ((wt-calls nil) (start-calls nil)
          (baton-sodagun--workspaces (make-hash-table :test 'equal)))
-     (ignore wt-calls start-calls fwd-calls)
+     (ignore wt-calls start-calls)
      (cl-letf (((symbol-function 'baton-sodagun--add-worktree)
                 (lambda (branch repo &optional base)
                   (push (list branch repo base) wt-calls)
@@ -212,11 +247,7 @@ forwarder \"processes\" are the port numbers themselves."
                ((symbol-function 'baton-sodagun--sandbox-start)
                 (lambda (rootdir rules &optional config)
                   (push (list rootdir rules config) start-calls)
-                  "sb-1"))
-               ((symbol-function 'baton-sodagun--start-forwarder)
-                (lambda (_rootdir port _session-name)
-                  (push port fwd-calls)
-                  port)))
+                  "sb-1")))
        ,@body)))
 
 (ert-deftest baton-test-sodagun-resolve-full-flow ()
@@ -243,14 +274,14 @@ forwarder \"processes\" are the port numbers themselves."
           ;; Sandbox started with one allow@host rule per declared port.
           (should (equal start-calls
                          '(("/root" ("allow@host:tcp:1234" "allow@host:tcp:5678") nil))))
-          ;; One forwarder per port.
-          (should (equal (sort fwd-calls #'<) '(1234 5678)))
-          ;; Resolve contract: run in the worktree, attach command, no host env.
+          ;; Resolve contract: run in the worktree, attach command carrying
+          ;; env and the in-guest forwarder ports, no host env.
           (should (equal (plist-get resolved :directory) "/work/feat"))
           (should (equal (plist-get resolved :command)
                          (baton-sodagun--attach-command
                           "/root" "claude"
-                          :env '("DIR=/work/feat" "PORT=1234"))))
+                          :env '("DIR=/work/feat" "PORT=1234")
+                          :ports '(1234 5678))))
           (should (null (plist-get resolved :extra-env)))
           ;; Session re-anchored to the worktree; workspace registered.
           (should (equal (baton--session-directory s) "/work/feat"))
@@ -307,29 +338,6 @@ The worktree is kept; no sandbox was started so no removal is issued."
           (should (null (gethash "sbx-fail" baton-sodagun--workspaces)))
           (should (null removed)))))))
 
-(ert-deftest baton-test-sodagun-resolve-removes-sandbox-on-forwarder-failure ()
-  "A forwarder failure after sandbox start tears the sandbox back down."
-  (baton-test-with-clean-state
-    (let ((baton-sodagun--workspaces (make-hash-table :test 'equal))
-          (removed nil))
-      (baton-define-agent
-       :name 'sbx-agent :command "cmd" :status-function-trigger :periodic
-       :env-functions (list (lambda (_k _d) '(:env ("A=1") :ports (1234)))))
-      (cl-letf (((symbol-function 'baton-sodagun--add-worktree)
-                 (lambda (&rest _args) '("/root" . "/work/feat")))
-                ((symbol-function 'baton-sodagun--sandbox-start)
-                 (lambda (&rest _args) "sb-1"))
-                ((symbol-function 'baton-sodagun--start-forwarder)
-                 (lambda (&rest _args) (error "Socat missing")))
-                ((symbol-function 'baton-sodagun--remove-sandbox)
-                 (lambda (rootdir _session-name) (push rootdir removed))))
-        (let ((s (baton-session-create :agent 'sbx-agent :command "claude"
-                                       :directory "/repo" :name "sbx-fwd-fail"
-                                       :executor 'sodagun)))
-          (should-error (baton-executor--resolve 'sodagun s))
-          (should (equal removed '("/root")))
-          (should (null (gethash "sbx-fwd-fail" baton-sodagun--workspaces))))))))
-
 (ert-deftest baton-test-sodagun-resolve-rejects-duplicate-registration ()
   "Resolve fails fast when a workspace is already registered for the session."
   (baton-test-with-clean-state
@@ -341,23 +349,6 @@ The worktree is kept; no sandbox was started so no removal is issued."
                                      :executor 'sodagun)))
         (puthash "sbx-dup" '(:rootdir "/stale") baton-sodagun--workspaces)
         (should-error (baton-executor--resolve 'sodagun s))))))
-
-(ert-deftest baton-test-sodagun-forwarder-command ()
-  "`baton-sodagun--start-forwarder' runs socat in the guest via sandbox exec.
-The process is labeled with the session name."
-  (let (seen-command seen-name)
-    (cl-letf (((symbol-function 'make-process)
-               (lambda (&rest plist)
-                 (setq seen-command (plist-get plist :command)
-                       seen-name (plist-get plist :name))
-                 'fake-proc)))
-      (should (eq (baton-sodagun--start-forwarder "/root" 4321 "sbx-1") 'fake-proc))
-      (should (equal seen-name "baton-sodagun-fwd-sbx-1-4321"))
-      (should (equal seen-command
-                     '("sodagun" "sandbox" "exec" "/root"
-                       "socat"
-                       "TCP-LISTEN:4321,bind=127.0.0.1,reuseaddr,fork"
-                       "TCP:host.microsandbox.internal:4321"))))))
 
 (ert-deftest baton-test-sodagun-remove-sandbox-command ()
   "`baton-sodagun--remove-sandbox' issues an async sandbox remove (not stop).
@@ -373,26 +364,22 @@ The process is labeled with the session name."
       (should (equal seen-command '("sodagun" "sandbox" "remove" "/root"))))))
 
 (ert-deftest baton-test-sodagun-teardown ()
-  "Teardown kills forwarders, removes the sandbox, keeps worktree, deregisters."
+  "Teardown removes the sandbox, keeps the worktree, and deregisters."
   (baton-test-with-clean-state
     (baton-define-agent :name 'sbx-agent :command "cmd"
                         :status-function-trigger :periodic)
     (let ((baton-sodagun--workspaces (make-hash-table :test 'equal))
-          (killed nil) (removed nil))
+          (removed nil))
       (let ((s (baton-session-create :agent 'sbx-agent :command "claude"
                                      :directory "/repo" :name "sbx-td"
                                      :executor 'sodagun)))
         (puthash "sbx-td"
                  (list :rootdir "/root" :worktree-path "/work/feat"
-                       :sandbox-name "sb-1" :ports '(1234)
-                       :forwarder-procs '(fake-proc-1 fake-proc-2))
+                       :sandbox-name "sb-1" :ports '(1234))
                  baton-sodagun--workspaces)
-        (cl-letf (((symbol-function 'process-live-p) (lambda (_p) t))
-                  ((symbol-function 'delete-process) (lambda (p) (push p killed)))
-                  ((symbol-function 'baton-sodagun--remove-sandbox)
+        (cl-letf (((symbol-function 'baton-sodagun--remove-sandbox)
                    (lambda (rootdir _session-name) (push rootdir removed))))
           (baton-executor--teardown 'sodagun s)
-          (should (equal (reverse killed) '(fake-proc-1 fake-proc-2)))
           (should (equal removed '("/root")))
           (should (null (gethash "sbx-td" baton-sodagun--workspaces)))
           ;; Idempotent: a second teardown is a no-op.

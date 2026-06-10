@@ -61,27 +61,26 @@ Worktree-only sessions (transient `-w`, no `-s`) run under the default `exec` ex
 
 `baton-sodagun.el` defines the `sodagun` executor (`cl-defmethod ... (eql sodagun)`), selected when `baton-new` is called with `--sandbox`. It creates a worktree, starts a microVM sandbox, bridges declared host ports into the guest, and runs the agent inside the sandbox.
 
-**Workspace registry (`baton-sodagun--workspaces`).** A hash table (`equal` test) mapping session name → durable workspace plist `(:rootdir :worktree-path :sandbox-name :ports :env :forwarder-procs)`. `baton-sodagun--register` merges props into the entry; `resolve` writes it **incrementally** as side effects succeed, and `teardown` consumes it. This registry — not the session metadata — is the source of truth for what must be cleaned up (session metadata is stashed pre-spawn, then clobbered by `baton-process-spawn`'s metadata init).
+**Workspace registry (`baton-sodagun--workspaces`).** A hash table (`equal` test) mapping session name → durable workspace plist `(:rootdir :worktree-path :sandbox-name :ports :env)`. `baton-sodagun--register` merges props into the entry; `resolve` writes it **incrementally** as side effects succeed, and `teardown` consumes it. This registry — not the session metadata — is the source of truth for what must be cleaned up (session metadata is stashed pre-spawn, then clobbered by `baton-process-spawn`'s metadata init).
 
 **`baton-executor--resolve ((eql sodagun) session)`** returns `(:directory WORKTREE :command ATTACH-CMD :extra-env nil)`:
 1. **Duplicate guard** — errors if a workspace is already registered for the session name (fail fast).
 2. **Worktree** — branch/base read from the session's create-time `:sodagun-branch`/`:sodagun-base` metadata; the branch auto-derives to `"baton/<session-name>"` when `:sodagun-branch` is nil. Created via `baton-sodagun--add-worktree`.
 3. **Agent env once** — `baton-executor--agent-env` evaluates the agent's `:env-functions` exactly once against the worktree path, yielding `:env` strings and `:ports`.
-4. **Sandbox start** — `baton-sodagun--sandbox-start` with one `allow@host:tcp:PORT` net-rule per declared port (`baton-sodagun--net-rules`); the returned `sandbox_name` is recorded (errors if absent).
-5. **Forwarders** — one in-guest socat forwarder per port (`baton-sodagun--start-forwarder`), each registered into `:forwarder-procs`.
-6. **Re-anchor** — sets the session's `directory` slot to the worktree path so directory-based lookups and the status buffer reflect where the agent works.
-7. Returns the attach command (`baton-sodagun--attach-command`) as `:command`; `:extra-env` is nil because env travels into the guest via attach `--env`, never the host `process-environment`. `baton-process-spawn` later launches the attach command in the terminal backend like any other session command.
+4. **Sandbox start** — `baton-sodagun--sandbox-start` with one `allow@host:tcp:PORT` net-rule per declared port (`baton-sodagun--net-rules`), plus `--config` when a `:sodagun-config` was stashed; the returned `sandbox_name` is recorded (errors if absent).
+5. **Re-anchor** — sets the session's `directory` slot to the worktree path so directory-based lookups and the status buffer reflect where the agent works.
+6. Returns the attach command (`baton-sodagun--attach-command`, carrying `:env` **and** `:ports`) as `:command`; `:extra-env` is nil because env travels into the guest via attach `--env`, never the host `process-environment`. `baton-process-spawn` later launches the attach command in the terminal backend like any other session command.
 
-On any mid-resolve failure, a `condition-case` calls `baton-executor--teardown` on the partial state (kills forwarders, removes the sandbox only if it started, keeps the worktree) and re-signals.
+On any mid-resolve failure, a `condition-case` calls `baton-executor--teardown` on the partial state (removes the sandbox only if it started, keeps the worktree) and re-signals.
 
-**`baton-executor--teardown ((eql sodagun) session)`** is idempotent and tolerates partial state: kills live `:forwarder-procs`, issues an **async** sandbox removal only when `:sandbox-name` was recorded, keeps the worktree on disk, and `remhash`es the registry entry (so subsequent calls are no-ops). The agent's attach process dies with the terminal buffer before the killed-hook fires teardown, so the sandbox has no users left when removal is issued.
+**`baton-executor--teardown ((eql sodagun) session)`** is idempotent and tolerates partial state: issues an **async** sandbox removal only when `:sandbox-name` was recorded, keeps the worktree on disk, and `remhash`es the registry entry (so subsequent calls are no-ops). The agent's attach process dies with the terminal buffer before the killed-hook fires teardown (freeing the sandbox's single connection); the in-guest socat forwarders die with the sandbox itself.
 
 **Pure CLI builders** (unit-tested without the binary):
 - `baton-sodagun--net-rules (ports)` → list of `"allow@host:tcp:PORT"` SPECs.
-- `baton-sodagun--attach-command (rootdir agent-command &key env)` → `sodagun sandbox attach <rootdir> --env K=V … -- <agent-cmd>`; rootdir and each env `VAR=VALUE` are shell-quoted, the agent command is embedded verbatim (it is already a complete shell command string).
+- `baton-sodagun--guest-forward-command (port)` → the in-guest socat invocation: guest `127.0.0.1:PORT` → `baton-sodagun--host-alias` (`"host.microsandbox.internal"`) `:PORT`.
+- `baton-sodagun--attach-command (rootdir agent-command &key env ports)` → `sodagun sandbox attach <rootdir> --env K=V … -- <guest-cmd>`; rootdir and each env `VAR=VALUE` are shell-quoted. With PORTS, `<guest-cmd>` is a wrapper `sh -c 'socat … & … exec <agent-cmd>'` that backgrounds one forwarder per port on the attach connection itself before `exec`ing the agent (the sandbox accepts only one concurrent connection); without PORTS the agent command is embedded directly.
 
 **Async process helpers** (named for identification in the process list):
-- `baton-sodagun--start-forwarder` → `baton-sodagun-fwd-<session>-<port>`, runs socat via `sodagun sandbox exec`: guest `127.0.0.1:PORT` → `baton-sodagun--host-alias` (`"host.microsandbox.internal"`) `:PORT`.
 - `baton-sodagun--remove-sandbox` → `baton-sodagun-remove-<session>`, runs `sodagun sandbox remove` (stop-and-remove, so stopped sandboxes don't accumulate); failures are reported via `message` only — the kill flow must not block or error.
 
 See [architecture.md](architecture.md#sandbox-spawn-the-sodagun-executor) for the end-to-end spawn/teardown flow.
