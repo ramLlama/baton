@@ -121,8 +121,16 @@ to customize.  Example — extend eat's pre-activation:
 
 ;;; Generic interface
 
+(defconst baton-term--shell "/bin/sh"
+  "Shell used to run session command strings in backends that exec directly.
+CMD is a POSIX shell command string and may contain multiple words; eat and
+ghostel exec a PROGRAM + ARGS, so their activate methods wrap CMD in
+`baton-term--shell' -c.  vterm shell-wraps internally via `vterm-shell'.")
+
 (cl-defgeneric baton-term--activate (backend buf dir cmd)
-  "Activate terminal BACKEND in BUF, running CMD in DIR.")
+  "Activate terminal BACKEND in BUF, running CMD in DIR.
+CMD is a POSIX shell command string (it may contain arguments and shell
+quoting, not just a program name).")
 
 (cl-defgeneric baton-term--send-string (backend buf string)
   "Send STRING to terminal BACKEND in BUF.")
@@ -153,7 +161,9 @@ to customize.  Example — extend eat's pre-activation:
     (with-current-buffer buf
       (let ((default-directory (file-name-as-directory dir)))
         (when pre-fn (funcall pre-fn))
-        (eat-exec buf (buffer-name buf) cmd nil nil)
+        ;; eat-exec execs COMMAND directly (no shell), so wrap the shell
+        ;; command string — see `baton-term--shell'.
+        (eat-exec buf (buffer-name buf) baton-term--shell nil (list "-c" cmd))
         (when post-fn (funcall post-fn))))))
 
 (cl-defmethod baton-term--send-string ((_backend (eql eat)) buf string)
@@ -218,7 +228,9 @@ to customize.  Example — extend eat's pre-activation:
     (with-current-buffer buf
       (let ((default-directory (file-name-as-directory dir)))
         (when pre-fn (funcall pre-fn))
-        (ghostel-exec buf cmd nil)
+        ;; ghostel-exec shell-quotes PROGRAM into a single token, so a
+        ;; multi-word command string must be wrapped — see `baton-term--shell'.
+        (ghostel-exec buf baton-term--shell (list "-c" cmd))
         (when post-fn (funcall post-fn))))))
 
 (cl-defmethod baton-term--send-string ((_backend (eql ghostel)) buf string)
