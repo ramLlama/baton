@@ -63,6 +63,45 @@
           (should (equal (reverse call-order) '(mode post))))
       (kill-buffer buf))))
 
+;;; ─── Shell wrapping tests ────────────────────────────────────────────────────
+;;
+;; COMMAND is a POSIX shell command string and may contain multiple words
+;; (e.g. "sodagun sandbox attach <dir> -- claude").  eat and ghostel exec a
+;; PROGRAM + ARGS directly, so the activate methods must wrap COMMAND in
+;; /bin/sh -c; vterm shell-wraps internally via vterm-shell.
+
+(ert-deftest baton-test-term-eat-shell-wraps-command ()
+  "Eat activation execs COMMAND via /bin/sh -c, not as a program name."
+  (let* ((captured nil)
+         (buf (get-buffer-create " *baton-term-test-eat-wrap*")))
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'require) #'ignore)
+                    ((symbol-function 'eat-exec)
+                     (lambda (_buf _name cmd _sf args)
+                       (setq captured (cons cmd args)))))
+            (baton-term--activate 'eat buf "/tmp"
+                                  "sodagun sandbox attach /x -- claude"))
+          (should (equal captured
+                         '("/bin/sh" . ("-c" "sodagun sandbox attach /x -- claude")))))
+      (kill-buffer buf))))
+
+(ert-deftest baton-test-term-ghostel-shell-wraps-command ()
+  "Ghostel activation execs COMMAND via /bin/sh -c, not as a program name."
+  (let* ((captured nil)
+         (buf (get-buffer-create " *baton-term-test-ghostel-wrap*")))
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'require) #'ignore)
+                    ((symbol-function 'ghostel-exec)
+                     (lambda (_buf program args)
+                       (setq captured (cons program args)))))
+            (baton-term--activate 'ghostel buf "/tmp"
+                                  "sodagun sandbox attach /x -- claude"))
+          (should (equal captured
+                         '("/bin/sh" . ("-c" "sodagun sandbox attach /x -- claude")))))
+      (kill-buffer buf))))
+
 ;;; ─── Config override test ────────────────────────────────────────────────────
 
 (ert-deftest baton-test-term-backend-config-override ()

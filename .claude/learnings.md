@@ -1,0 +1,14 @@
+# Learnings
+
+Append-only log of non-obvious lessons learned while working on baton. Newest entries at the bottom; timestamp each batch.
+
+## 2026-06-11 — sandboxing integration (Plan 3)
+
+- **Terminal backends differ in how they exec the session command.** `ghostel-exec` shell-quotes PROGRAM into a *single token* and `eat-exec` execs COMMAND directly; only vterm shell-wraps internally. A multi-word command string (the first one ever was `sodagun sandbox attach … -- claude`) execs a program literally named the whole string and dies instantly. Hence the uniform contract: baton-term backends wrap COMMAND in `/bin/sh -c`.
+- **Instant process death erases its own evidence.** When the spawned command exits immediately, the terminal kills the buffer → `baton-process--on-buffer-killed` → registry cleanup + executor teardown (sandbox removed). Both registries end up empty and the failure looks like "nothing happened". `baton-logging.el` (advice-based, with a buffer/process post-mortem on kill) exists precisely to catch this class.
+- **`exec-path` and `PATH` diverge.** `executable-find` succeeding does not mean a `/bin/sh -c` child can find the binary — GUI Emacs may have `exec-path` patched while the `PATH` env var isn't. Shell command strings must embed absolute paths (`baton-sodagun--executable`).
+- **macOS GUI/daemon processes get a 256 soft fd limit**, inherited by everything they spawn. The sandbox VM SIGABRT'd at boot only when launched from Emacs, and only after the git mounts pushed fd usage over the edge. Fixed in sodagun (raises `RLIMIT_NOFILE` at startup), but remember the pattern: "works from shell, dies from Emacs" → check limits. Repro harness gotcha: `ulimit -n` clamps the *hard* limit too; use `ulimit -S -n` to mimic the GUI condition.
+- **microsandbox sandboxes accept ONE concurrent connection**, and a killed client leaks the slot until remove/start. Long-running `sodagun sandbox exec` forwarders can never coexist with the attach — anything needing concurrent in-guest processes must ride the attach command's wrapper shell (`sh -c 'socat & … exec agent'`).
+- **Fresh worktrees are direnv-untrusted** (trust is per-path). Solved with `baton-sodagun-worktree-created-hook` + a user-config hook that propagates trust only when the worktree `.envrc` is byte-identical to the already-allowed repo one.
+- **Stale `.elc` files repeatedly burned debugging sessions** ("Source file newer than byte-compiled file; using older file", or a running Emacs holding old definitions). Before testing changes: `make compile`, reload, and verify a changed function's behavior with a quick eval.
+- **Debug-only code in a separate file + separate tail commit** (`baton-logging.el`, stacked PR) keeps it trivially droppable while letting the main branch carry it during stabilization.

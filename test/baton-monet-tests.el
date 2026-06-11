@@ -274,7 +274,7 @@ Even when the terminal output matches a different waiting pattern (e.g.
 (ert-deftest baton-test-monet-session-env-function ()
   "`baton-monet--session-env-function' returns MONET_CTX_baton_session env var."
   (should (equal (baton-monet--session-env-function "claude-1" "/proj")
-                 '("MONET_CTX_baton_session=claude-1"))))
+                 '(:env ("MONET_CTX_baton_session=claude-1")))))
 
 ;;; ─── baton-monet-setup / baton-monet--teardown tests ────────────────────────
 
@@ -298,6 +298,69 @@ Even when the terminal output matches a different waiting pattern (e.g.
           (should (eq (plist-get def :status-function) #'baton-monet--hook-status-fn)))
         (should (eq baton-monet--saved-claude-trigger :periodic))
         (should (eq baton-monet--saved-claude-status-fn original-fn))))))
+
+(ert-deftest baton-test-monet-setup-registers-env-functions ()
+  "`baton-monet-setup' registers both env-functions on claude-code, in order.
+The order matters for the sandbox path: the server env-function
+contributes the MCP + hook :ports (driving the executor's forwarders)
+and its :env leads the attach --env list, followed by the
+MONET_CTX_baton_session injection."
+  (skip-unless (featurep 'monet))
+  (baton-test-with-clean-state
+    (baton-define-agent :name 'claude-code :command "claude"
+                        :status-function-trigger :periodic)
+    (let ((monet--tool-registry nil)
+          (monet--enabled-sets '(:core :simple-diff))
+          (monet-open-diff-tool-schema nil)
+          (monet--claude-hook-functions nil)
+          (baton-monet--saved-claude-status-fn nil)
+          (baton-monet--saved-claude-trigger nil))
+      (baton-monet-setup)
+      (let ((env-fns (plist-get (gethash 'claude-code baton-agents)
+                                :env-functions)))
+        (should (equal env-fns
+                       (list #'baton-monet--start-server-env-function
+                             #'baton-monet--session-env-function)))))))
+
+(ert-deftest baton-test-monet-start-server-env-fn-passes-path-mappings ()
+  "The server env-function forwards executor-declared path mappings.
+Executors (the sodagun one) bind `baton-executor-guest-path-mappings'
+around env evaluation; monet uses them for lockfile workspace folders
+and bidirectional protocol path translation."
+  (baton-test-with-clean-state
+    (let (seen-args)
+      (cl-letf (((symbol-function 'monet-start-server-function)
+                 (lambda (key dir &optional mappings)
+                   (setq seen-args (list key dir mappings))
+                   '(:env ("X=1") :ports (1)))))
+        (let ((baton-executor-guest-path-mappings
+               '(("/work/feat" . "/workspace"))))
+          (baton-monet--start-server-env-function "claude-1" "/work/feat"))
+        (should (equal seen-args
+                       '("claude-1" "/work/feat"
+                         (("/work/feat" . "/workspace")))))))))
+
+(ert-deftest baton-test-monet-session-killed-stops-monet-session ()
+  "Killing a baton session stops its monet session (server + lockfile).
+Without this, monet servers and lockfiles leak across baton sessions."
+  (skip-unless (featurep 'monet))
+  (baton-test-with-clean-state
+    (baton-define-agent :name 'claude-code :command "claude"
+                        :status-function-trigger :periodic)
+    (let ((monet--sessions (make-hash-table :test 'equal))
+          (stopped nil))
+      (puthash "claude-kill-test" 'fake-monet-session monet--sessions)
+      (cl-letf (((symbol-function 'monet-stop-server)
+                 (lambda (key) (push key stopped))))
+        (let ((s (baton-session-create :agent 'claude-code :command "claude"
+                                       :directory "/tmp"
+                                       :name "claude-kill-test")))
+          (baton-monet--on-session-killed s)
+          (should (equal stopped '("claude-kill-test")))
+          ;; A session with no monet server is a quiet no-op.
+          (remhash "claude-kill-test" monet--sessions)
+          (baton-monet--on-session-killed s)
+          (should (equal stopped '("claude-kill-test"))))))))
 
 (ert-deftest baton-test-monet-teardown-restores-claude ()
   "`baton-monet--teardown' restores claude-code's original trigger and status-fn."

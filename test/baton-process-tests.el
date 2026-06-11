@@ -247,6 +247,168 @@ before switching to the new vterm buffer."
                                (mapcar (lambda (f) (funcall f "id" "/tmp")) env-fns)))))
       (should (null extra-env)))))
 
+;;; ─── env aggregation (:env/:ports contract) tests ──────────────────────────
+
+(ert-deftest baton-test-agent-env-plist-shape ()
+  "Env-functions returning (:env … :ports …) aggregate both keys, in order."
+  (baton-test-with-clean-state
+    (baton-define-agent
+     :name 'plist-agent :command "cmd" :status-function-trigger :periodic
+     :env-functions (list (lambda (_k _d) '(:env ("A=1" "B=2") :ports (1234)))
+                          (lambda (_k _d) '(:env ("C=3") :ports (5678)))))
+    (let* ((s (baton-session-create :agent 'plist-agent :command "cmd" :directory "/tmp"))
+           (result (baton-executor--agent-env s "/tmp")))
+      (should (equal (plist-get result :env) '("A=1" "B=2" "C=3")))
+      (should (equal (plist-get result :ports) '(1234 5678))))))
+
+(ert-deftest baton-test-agent-env-rejects-bare-list ()
+  "An env-function returning a bare \"VAR=VALUE\" list is an error."
+  (baton-test-with-clean-state
+    (baton-define-agent
+     :name 'bare-list-agent :command "cmd" :status-function-trigger :periodic
+     :env-functions (list (lambda (_k _d) '("A=1"))))
+    (let ((s (baton-session-create :agent 'bare-list-agent :command "cmd" :directory "/tmp")))
+      (should-error (baton-executor--agent-env s "/tmp")))))
+
+(ert-deftest baton-test-agent-env-nil-contribution-allowed ()
+  "An env-function returning nil contributes nothing without erroring."
+  (baton-test-with-clean-state
+    (baton-define-agent
+     :name 'nil-agent :command "cmd" :status-function-trigger :periodic
+     :env-functions (list (lambda (_k _d) nil)
+                          (lambda (_k _d) '(:env ("A=1")))))
+    (let* ((s (baton-session-create :agent 'nil-agent :command "cmd" :directory "/tmp"))
+           (result (baton-executor--agent-env s "/tmp")))
+      (should (equal (plist-get result :env) '("A=1")))
+      (should (null (plist-get result :ports))))))
+
+(ert-deftest baton-test-agent-env-ports-deduped ()
+  "Duplicate ports declared by multiple env-functions aggregate uniquely."
+  (baton-test-with-clean-state
+    (baton-define-agent
+     :name 'dup-agent :command "cmd" :status-function-trigger :periodic
+     :env-functions (list (lambda (_k _d) '(:env ("A=1") :ports (1234)))
+                          (lambda (_k _d) '(:env ("B=2") :ports (1234 5678)))))
+    (let* ((s (baton-session-create :agent 'dup-agent :command "cmd" :directory "/tmp"))
+           (result (baton-executor--agent-env s "/tmp")))
+      (should (equal (plist-get result :ports) '(1234 5678))))))
+
+(ert-deftest baton-test-agent-env-no-env-functions ()
+  "An agent without env-functions yields empty env and ports."
+  (baton-test-with-clean-state
+    (baton-define-agent :name 'bare-agent :command "cmd"
+                        :status-function-trigger :periodic)
+    (let* ((s (baton-session-create :agent 'bare-agent :command "cmd" :directory "/tmp"))
+           (result (baton-executor--agent-env s "/tmp")))
+      (should (null (plist-get result :env)))
+      (should (null (plist-get result :ports))))))
+
+(ert-deftest baton-test-agent-env-receives-name-and-dir ()
+  "Env-functions are called with the session name and the given directory."
+  (baton-test-with-clean-state
+    (let (seen)
+      (baton-define-agent
+       :name 'args-agent :command "cmd" :status-function-trigger :periodic
+       :env-functions (list (lambda (k d) (setq seen (list k d)) nil)))
+      (let ((s (baton-session-create :agent 'args-agent :command "cmd"
+                                     :directory "/tmp" :name "my-session")))
+        (baton-executor--agent-env s "/elsewhere")
+        (should (equal seen '("my-session" "/elsewhere")))))))
+
+;;; ─── executor dispatch tests ───────────────────────────────────────────────
+
+(ert-deftest baton-test-session-executor-defaults-to-exec ()
+  "`baton-session-create' defaults the executor slot to `exec'."
+  (baton-test-with-clean-state
+    (baton-define-agent :name 'ex-agent :command "cmd"
+                        :status-function-trigger :periodic)
+    (let ((s (baton-session-create :agent 'ex-agent :command "cmd" :directory "/tmp")))
+      (should (eq (baton--session-executor s) 'exec)))))
+
+(ert-deftest baton-test-exec-resolve-returns-session-fields ()
+  "The `exec' executor resolves to the session's own directory and command."
+  (baton-test-with-clean-state
+    (baton-define-agent :name 'ex-agent :command "cmd"
+                        :status-function-trigger :periodic)
+    (let* ((s (baton-session-create :agent 'ex-agent :command "my-cmd --flag"
+                                    :directory "/tmp"))
+           (resolved (baton-executor--resolve 'exec s)))
+      (should (equal (plist-get resolved :directory) "/tmp"))
+      (should (equal (plist-get resolved :command) "my-cmd --flag"))
+      (should (null (plist-get resolved :extra-env))))))
+
+(ert-deftest baton-test-exec-resolve-includes-agent-env ()
+  "The `exec' executor exposes aggregated agent env as :extra-env, ignoring ports."
+  (baton-test-with-clean-state
+    (baton-define-agent
+     :name 'ex-env-agent :command "cmd" :status-function-trigger :periodic
+     :env-functions (list (lambda (_k _d) '(:env ("PORT_VAR=1234") :ports (1234)))
+                          (lambda (_k _d) '(:env ("OTHER=x")))))
+    (let* ((s (baton-session-create :agent 'ex-env-agent :command "cmd" :directory "/tmp"))
+           (resolved (baton-executor--resolve 'exec s)))
+      (should (equal (plist-get resolved :extra-env) '("PORT_VAR=1234" "OTHER=x"))))))
+
+(ert-deftest baton-test-exec-teardown-default-noop ()
+  "The default `baton-executor--teardown' method is a no-op."
+  (baton-test-with-clean-state
+    (baton-define-agent :name 'ex-agent :command "cmd"
+                        :status-function-trigger :periodic)
+    (let ((s (baton-session-create :agent 'ex-agent :command "cmd" :directory "/tmp")))
+      (should (null (baton-executor--teardown 'exec s))))))
+
+(defvar baton-test--teardown-calls nil
+  "Session names captured by the test executor's teardown method.")
+
+(cl-defmethod baton-executor--teardown ((_executor (eql baton-test--executor)) session)
+  "Record SESSION's name for executor-dispatch assertions."
+  (push (baton--session-name session) baton-test--teardown-calls))
+
+(ert-deftest baton-test-teardown-dispatches-on-executor ()
+  "Session kill dispatches teardown on the session's executor symbol."
+  (baton-test-with-clean-state
+    (baton-define-agent :name 'td-agent :command "cmd"
+                        :status-function-trigger :periodic)
+    (let ((baton-test--teardown-calls nil)
+          (baton-session-killed-hook (list #'baton-executor--teardown-on-kill)))
+      (let ((s (baton-session-create :agent 'td-agent :command "cmd"
+                                     :directory "/tmp" :name "td-1"
+                                     :executor 'baton-test--executor)))
+        (baton-session-kill s)
+        (should (equal baton-test--teardown-calls '("td-1")))))))
+
+(ert-deftest baton-test-teardown-hook-registered ()
+  "Loading baton-executor registers the executor-teardown dispatch globally."
+  (should (memq #'baton-executor--teardown-on-kill baton-session-killed-hook)))
+
+;;; ─── baton-process-spawn executor regression tests ─────────────────────────
+
+(ert-deftest baton-test-spawn-applies-agent-env-once ()
+  "Spawn injects agent env, evaluating each env-function exactly once."
+  (baton-test-with-clean-state
+    (let ((eval-count 0)
+          (captured-env nil))
+      (baton-define-agent
+       :name 'spawn-once-agent :command "true" :status-function-trigger :periodic
+       :env-functions (list (lambda (_k _d)
+                              (cl-incf eval-count)
+                              '(:env ("BATON_TEST_ONCE=yes") :ports (4321)))))
+      (let ((session (baton-session-create :agent 'spawn-once-agent
+                                           :command "true" :directory "/tmp")))
+        (unwind-protect
+            (cl-letf (((symbol-function 'require)
+                       (lambda (feat &rest args)
+                         (unless (eq feat 'vterm) (apply #'require feat args))))
+                      ((symbol-function 'vterm-mode)
+                       (lambda () (setq captured-env process-environment)))
+                      ((symbol-function 'pop-to-buffer) #'ignore)
+                      ((symbol-function 'baton-process--start-watcher) #'ignore))
+              (let ((baton-terminal-backend 'vterm))
+                (baton-process-spawn session)))
+          (when-let* ((buf (baton--session-buffer session)))
+            (when (buffer-live-p buf) (kill-buffer buf))))
+        (should (member "BATON_TEST_ONCE=yes" captured-env))
+        (should (= 1 eval-count))))))
+
 ;;; ─── baton-process-session-tail tests ──────────────────────────────────────
 
 (ert-deftest baton-test-session-tail-live-buffer ()

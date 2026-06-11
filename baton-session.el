@@ -20,6 +20,7 @@
   directory       ; string, working directory
   buffer          ; vterm buffer
   status          ; symbol: running | waiting | idle | error | other
+  executor        ; symbol: how/where the command runs (exec = direct host)
   waiting-reason  ; string or nil; holds reason for waiting, error, and other statuses
   created-at      ; float-time timestamp
   updated-at      ; float-time timestamp
@@ -75,12 +76,14 @@ Increments the counter for AGENT and returns \"<prefix>-<n>\"."
 
 ;;; Public API
 
-(cl-defun baton-session-create (&key agent command directory name)
+(cl-defun baton-session-create (&key agent command directory name (executor 'exec))
   "Create and register a new baton session.
 AGENT is a symbol key into `baton-agents'.
 COMMAND is the shell command string.
 DIRECTORY is the working directory.
 NAME is optional; auto-generated from AGENT if omitted.
+EXECUTOR is a symbol selecting the execution environment (default `exec',
+which runs the command directly on the host); see `baton-exec--resolve'.
 Returns the new `baton--session'."
   (let* ((session-name (or name (baton--next-session-name agent)))
          (now (float-time)))
@@ -93,6 +96,7 @@ Returns the new `baton--session'."
                      :directory directory
                      :buffer nil
                      :status 'running
+                     :executor executor
                      :waiting-reason nil
                      :created-at now
                      :updated-at now

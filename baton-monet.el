@@ -31,9 +31,13 @@
 (declare-function monet-enable-tool-set "monet" (&rest sets))
 (declare-function monet-ediff-tool "monet"
                   (old-file new-file new-contents on-accept on-quit &optional session))
-(declare-function monet-start-server-function "monet" (key directory))
+(declare-function monet-start-server-function "monet"
+                  (key directory &optional path-mappings))
+(declare-function monet-stop-server "monet" (key))
 (declare-function monet-add-claude-hook-handler "monet" (handler))
 (declare-function monet-remove-claude-hook-handler "monet" (handler))
+(defvar monet--sessions)
+(defvar baton-executor-guest-path-mappings)
 (defvar monet-open-diff-tool-schema nil
   "MCP inputSchema for the openDiff tool (provided by monet).")
 
@@ -64,12 +68,33 @@ Also calls `baton-session-set-status' so the change is applied immediately."
                    :state `(:status ,status :reason ,reason :at ,(float-time))))
   (baton-session-set-status session status reason))
 
-;;; Session Env Function
+;;; Session Env Functions
+
+(defun baton-monet--start-server-env-function (session-name directory)
+  "Start a monet server for SESSION-NAME in DIRECTORY; return its env plist.
+Wraps `monet-start-server-function', forwarding any executor-declared
+guest path mappings (`baton-executor-guest-path-mappings') so monet can
+translate protocol paths and advertise the guest workspace folder in
+its IDE lockfile."
+  (monet-start-server-function session-name directory
+                                baton-executor-guest-path-mappings))
 
 (defun baton-monet--session-env-function (session-name _directory)
   "Return env vars injecting SESSION-NAME into the Claude Code process environment.
 Injects MONET_CTX_baton_session so hook handlers can look up the session."
-  (list (format "MONET_CTX_baton_session=%s" session-name)))
+  (list :env (list (format "MONET_CTX_baton_session=%s" session-name))))
+
+;;; Session Lifecycle Bridge
+
+(defun baton-monet--on-session-killed (session)
+  "Stop the monet session belonging to the killed baton SESSION.
+Stops the per-session MCP server and removes its IDE lockfile; without
+this, monet servers and lockfiles leak across baton sessions.  Quiet
+no-op for sessions without a monet server."
+  (when (featurep 'monet)
+    (let ((name (baton--session-name session)))
+      (when (gethash name monet--sessions)
+        (monet-stop-server name)))))
 
 ;;; Hook Handler
 
@@ -96,6 +121,7 @@ CTX is the monet_context alist."
 Safe to call even if monet is not loaded."
   (when (featurep 'monet)
     (monet-remove-claude-hook-handler #'baton-monet--claude-hook-handler))
+  (remove-hook 'baton-session-killed-hook #'baton-monet--on-session-killed)
   (remove-hook 'baton-session-status-changed-hook #'baton-monet--update-review-bar)
   (when (boundp 'baton-list-mode-map)
     (define-key baton-list-mode-map (kbd "r") nil))
@@ -258,9 +284,10 @@ Safe to call even if monet is not loaded — does nothing in that case."
      :handler #'baton-monet--open-diff-handler
      :set :baton)
     (monet-enable-tool-set :baton)
-    (baton-add-env-function 'claude-code #'monet-start-server-function)
+    (baton-add-env-function 'claude-code #'baton-monet--start-server-env-function)
     (baton-add-env-function 'claude-code #'baton-monet--session-env-function)
     (monet-add-claude-hook-handler #'baton-monet--claude-hook-handler)
+    (add-hook 'baton-session-killed-hook #'baton-monet--on-session-killed)
     ;; Switch claude-code to event-driven status detection.
     (when (boundp 'baton-agents)
       (when-let* ((def (gethash 'claude-code baton-agents)))

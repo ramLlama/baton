@@ -47,10 +47,12 @@ test: compile
 	  --eval "(package-initialize)" \
 	  -l ert \
 	  -l baton-session.el \
+	  -l baton-executor.el \
 	  -l baton-term.el \
 	  -l baton-process.el \
 	  -l baton-notify.el \
 	  -l baton-alert.el \
+	  -l baton-sodagun.el \
 	  $(if $(MONET_DIR),-l monet -l baton-monet.el) \
 	  -l baton.el \
 	  $(foreach f,$(TEST_FILES),-l $(f)) \

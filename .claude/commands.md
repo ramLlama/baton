@@ -10,9 +10,16 @@ Invoke via `M-x baton` or bind with `(global-set-key (kbd "C-c b") #'baton)`.
 |------|--------------------------|--------------------------------------------------|
 | `-a` | `baton--agent-infix`    | Agent for this spawn (ephemeral)                 |
 | `-n` | `baton--name-infix`     | Session name for this spawn (ephemeral)          |
+| `-w` | `baton--worktree-infix` | sodagun worktree branch to run the session in    |
+| `-B` | `baton--base-infix`     | Base ref for the worktree branch (unset = sodagun default) |
+| `-s` | `--sandbox` (switch)    | Run the session inside a sodagun microVM sandbox (`sodagun` executor) |
 | `n`  | `baton-new`             | Spawn a new agent session                        |
 | `k`  | `baton-kill`            | Kill a session by name                           |
 | `K`  | `baton-kill-all`        | Kill all sessions                                |
+
+The `-w`, `-B`, and `-s` options appear only when sodagun is usable (`baton--sodagun-usable-p`: `baton-sodagun` loaded **and** the `sodagun` binary on `exec-path`). Setting `-w` makes the next `baton-new` create a sodagun worktree on that branch and run the session there (on the host); `-B` overrides the base ref the branch is cut from.
+
+Setting `-s` runs the session inside a sodagun microVM sandbox via the `sodagun` executor. A sandbox implies a worktree: the worktree and sandbox are created lazily at spawn time, and the branch is derived from the session name when `-w` is absent (`-w`/`-B` still select an explicit branch/base). The agent's declared `:ports` are forwarded guest→host. See [domain-model.md](domain-model.md#the-sodagun-executor) and [architecture.md](architecture.md#sandbox-spawn-the-sodagun-executor).
 
 **Navigate**:
 
