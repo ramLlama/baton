@@ -28,6 +28,15 @@
 (require 'baton-session)
 (require 'baton-executor)
 
+(defcustom baton-sodagun-guest-workdir "/workspace"
+  "Path the worktree is bind-mounted to inside sandbox guests.
+Must match the sandbox working_dir in sodagun.toml.  Exposed to
+env-functions as a path mapping via
+`baton-executor-guest-path-mappings' so integrations (monet) can
+translate paths between the host worktree and the guest view."
+  :type 'string
+  :group 'baton)
+
 (defun baton-sodagun-available-p ()
   "Return non-nil when the sodagun CLI is available."
   (and (executable-find "sodagun") t))
@@ -224,7 +233,12 @@ worktree kept) before the error propagates."
                           branch (baton--session-directory session) base))
                (rootdir (car worktree))
                (worktree-path (cdr worktree))
-               (agent-env (baton-executor--agent-env session worktree-path))
+               ;; Env-functions see how the worktree maps into the guest
+               ;; (monet uses it for lockfile folders + path translation).
+               (agent-env (let ((baton-executor-guest-path-mappings
+                                 (list (cons worktree-path
+                                             baton-sodagun-guest-workdir))))
+                            (baton-executor--agent-env session worktree-path)))
                (env (plist-get agent-env :env))
                (ports (plist-get agent-env :ports)))
           (baton-sodagun--register name

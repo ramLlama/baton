@@ -305,6 +305,23 @@ Binds `wt-calls', `start-calls', and an isolated
         (should (equal start-calls
                        '(("/root" nil "/repo/custom-sodagun.toml"))))))))
 
+(ert-deftest baton-test-sodagun-resolve-binds-guest-path-mappings ()
+  "Resolve exposes the worktree-to-guest mapping to env-functions."
+  (baton-test-with-clean-state
+    (baton-sodagun-test--with-executor-stubs
+      (let (seen-mappings)
+        (baton-define-agent
+         :name 'sbx-agent :command "cmd" :status-function-trigger :periodic
+         :env-functions (list (lambda (_k _d)
+                                (setq seen-mappings
+                                      baton-executor-guest-path-mappings)
+                                nil)))
+        (let ((s (baton-session-create :agent 'sbx-agent :command "claude"
+                                       :directory "/repo" :name "sbx-guest"
+                                       :executor 'sodagun)))
+          (baton-executor--resolve 'sodagun s)
+          (should (equal seen-mappings '(("/work/feat" . "/workspace")))))))))
+
 (ert-deftest baton-test-sodagun-resolve-auto-branch ()
   "Sandbox without an explicit branch derives one from the session name."
   (baton-test-with-clean-state

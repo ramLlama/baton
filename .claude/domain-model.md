@@ -37,6 +37,7 @@ Generic interface:
 - `baton-executor--teardown (executor session)` -- release resources held for the session. Default method is a no-op. **Implementations must be idempotent.**
 - `baton-executor--teardown-on-kill (session)` -- dispatches teardown for the session's executor; registered on `baton-session-killed-hook` **at load time** (not by `baton-mode`), so it survives `baton-mode` toggles.
 - `baton-executor--agent-env (session dir)` -- evaluates the agent's `:env-functions` **exactly once** with `(SESSION-NAME DIR)`, aggregating results into `(:env STRINGS :ports PORTS)` (ports deduped via `delete-dups`). Enforces the env-function plist contract (errors on any other shape).
+- `baton-executor-guest-path-mappings` (defvar, nil) -- alist of `(HOST-DIR . GUEST-DIR)` describing where the session's directory appears inside a sandbox guest. Sandboxed executors bind it dynamically around `baton-executor--agent-env` so integrations (monet's IDE lockfile + protocol path translation) can map paths in both directions. Nil for host execution.
 
 Built-in executor:
 - **`exec`** -- direct host execution (the default). `baton-executor--resolve` uses the session's own directory and command, and exposes aggregated agent `:env` as `:extra-env`. `:ports` is ignored because localhost is already reachable.
@@ -130,4 +131,4 @@ Key private symbols (double-dash, architected for future promotion to public):
 - `baton-session-status-changed-hook` -- args: `(session old-status new-status)`
 - `baton-session-unread-changed-hook` -- args: `(session)` — fires on read→unread transition
 
-Most are wired up by `baton--setup-hooks` when `baton-mode` is enabled. Exception: `baton-executor--teardown-on-kill` is added to `baton-session-killed-hook` at `baton-executor.el` **load time**, independent of `baton-mode`, so executor teardown runs even when `baton-mode` is off or has been toggled.
+Most are wired up by `baton--setup-hooks` when `baton-mode` is enabled. Exception: `baton-executor--teardown-on-kill` is added to `baton-session-killed-hook` at `baton-executor.el` **load time**, independent of `baton-mode`, so executor teardown runs even when `baton-mode` is off or has been toggled. `baton-monet-setup` additionally registers `baton-monet--on-session-killed` on `baton-session-killed-hook` (removed by `baton-monet--teardown`): it stops the killed session's monet server via `monet-stop-server`, preventing monet servers and IDE lockfiles from leaking across sessions.

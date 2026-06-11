@@ -20,6 +20,15 @@
 
 ;;; Generic interface
 
+(defvar baton-executor-guest-path-mappings nil
+  "Host-to-guest path mappings the current executor exposes to agents.
+An alist of (HOST-DIR . GUEST-DIR).  Sandboxed executors bind this
+\(dynamically, around agent env-function evaluation) to describe where
+the session's directory appears inside the guest — e.g.
+\((\"/path/to/worktree\" . \"/workspace\")) — so integrations (monet's
+IDE lockfile and protocol path translation) can map paths in both
+directions.  Nil for host execution.")
+
 (cl-defgeneric baton-executor--resolve (executor session)
   "Perform pre-spawn setup for SESSION under EXECUTOR.
 Returns a plist (:directory DIR :command CMD :extra-env ENV).  DIR is the
