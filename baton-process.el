@@ -12,7 +12,6 @@
 
 ;;; Code:
 (require 'cl-lib)
-(require 'inheritenv)
 (require 'baton-session)
 (require 'baton-executor)
 (require 'baton-term)
@@ -60,23 +59,24 @@ then launched in the configured terminal backend.  The buffer is named
          (extra-env (plist-get resolved :extra-env))
          (buf-name (format "*baton:%s*" (baton--session-name session)))
          (buf (get-buffer-create buf-name)))
-    ;; inheritenv must wrap baton-term-spawn-in-buffer so it captures the calling
-    ;; buffer's process-environment (set by envrc.el/direnv) before the buffer
-    ;; switch discards it.  extra-env is prepended inside inheritenv so both
-    ;; sources are visible to the backend when it spawns the process.
-    (inheritenv
-     (when extra-env
-       (setq process-environment (append extra-env process-environment)))
-     (baton-term-spawn-in-buffer buf dir command)
-     (with-current-buffer buf
-       (setq-local baton--current-session session)
-       ;; Anchor dired (C-x d) and other directory-sensitive commands to the
-       ;; session's working directory, not Emacs's global default-directory.
-       (setq-local default-directory (file-name-as-directory dir))
-       ;; Reset to running when the user types
-       (add-hook 'pre-command-hook #'baton-process--on-input nil t)
-       ;; Remove session from registry if the buffer is killed externally
-       (add-hook 'kill-buffer-hook #'baton-process--on-buffer-killed nil t)))
+    ;; Capture the calling buffer's process-environment (buffer-local when
+    ;; envrc.el/direnv manages it), prepend extra-env, and install the result
+    ;; as the DEFAULT value for the duration of the spawn: the terminal buffer
+    ;; has no local binding, so its make-process reads the default.  A `setq'
+    ;; here would instead write the calling buffer's local binding -- dropping
+    ;; extra-env across the buffer switch and polluting that buffer's env.
+    (cl-letf (((default-value 'process-environment)
+               (append extra-env process-environment)))
+      (baton-term-spawn-in-buffer buf dir command)
+      (with-current-buffer buf
+        (setq-local baton--current-session session)
+        ;; Anchor dired (C-x d) and other directory-sensitive commands to the
+        ;; session's working directory, not Emacs's global default-directory.
+        (setq-local default-directory (file-name-as-directory dir))
+        ;; Reset to running when the user types
+        (add-hook 'pre-command-hook #'baton-process--on-input nil t)
+        ;; Remove session from registry if the buffer is killed externally
+        (add-hook 'kill-buffer-hook #'baton-process--on-buffer-killed nil t)))
     (setf (baton--session-buffer session) buf)
     ;; Initialize watcher metadata
     (let ((now (float-time)))

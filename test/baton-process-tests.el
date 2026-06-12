@@ -190,6 +190,55 @@ before switching to the new vterm buffer."
           (when (buffer-live-p buf) (kill-buffer buf))))
       (should (member "BATON_TEST_DIRENV_VAR=from-envrc" captured-env)))))
 
+(ert-deftest baton-test-spawn-extra-env-survives-envrc-caller ()
+  "Agent extra-env reaches the spawn when the caller's env is buffer-local.
+Covers the envrc.el/direnv scenario: the calling buffer has a buffer-local
+`process-environment'.  Regression: a plain `setq' during spawn wrote that
+buffer-local binding instead of the default value the terminal buffer reads,
+so extra-env (monet ports etc.) was dropped across the buffer switch and the
+caller's environment was polluted with per-session vars."
+  (baton-test-with-clean-state
+    (baton-define-agent :name 'spawn-extra-env-agent :command "true"
+                        :status-function-trigger :periodic
+                        :env-functions
+                        (list (lambda (_name _dir)
+                                '(:env ("BATON_TEST_EXTRA_VAR=from-agent")))))
+    (let* ((captured-env nil)
+           (session (baton-session-create :agent 'spawn-extra-env-agent
+                                          :command "true"
+                                          :directory "/tmp"))
+           ;; Simulates a direnv-managed project buffer where envrc.el has
+           ;; injected vars into the buffer-local process-environment.
+           (caller-buf (get-buffer-create " *baton-test-envrc-extra-caller*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer caller-buf
+              (setq-local process-environment
+                          (cons "BATON_TEST_DIRENV_VAR=from-envrc"
+                                process-environment)))
+            ;; Mock vterm so the test runs without a real terminal.
+            (cl-letf (((symbol-function 'require)
+                       (lambda (feat &rest args)
+                         (unless (eq feat 'vterm) (apply #'require feat args))))
+                      ((symbol-function 'vterm-mode)
+                       (lambda () (setq captured-env process-environment)))
+                      ((symbol-function 'pop-to-buffer) #'ignore)
+                      ((symbol-function 'baton-process--start-watcher) #'ignore))
+              (let ((baton-terminal-backend 'vterm))
+                (with-current-buffer caller-buf
+                  (baton-process-spawn session))))
+            ;; Both the caller's direnv env and the agent extra-env reach the
+            ;; spawned process.
+            (should (member "BATON_TEST_DIRENV_VAR=from-envrc" captured-env))
+            (should (member "BATON_TEST_EXTRA_VAR=from-agent" captured-env))
+            ;; The caller's buffer-local env must not accumulate session vars.
+            (with-current-buffer caller-buf
+              (should-not (member "BATON_TEST_EXTRA_VAR=from-agent"
+                                  process-environment))))
+        (kill-buffer caller-buf)
+        (when-let* ((buf (baton--session-buffer session)))
+          (when (buffer-live-p buf) (kill-buffer buf)))))))
+
 ;;; ─── baton-process env-functions tests ──────────────────────────────────────
 
 (ert-deftest baton-test-env-functions-nil-by-default ()
