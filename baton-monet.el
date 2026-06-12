@@ -32,12 +32,13 @@
 (declare-function monet-ediff-tool "monet"
                   (old-file new-file new-contents on-accept on-quit &optional session))
 (declare-function monet-start-server-function "monet"
-                  (key directory &optional path-mappings))
+                  (key directory &optional path-mappings lockfile-pid))
 (declare-function monet-stop-server "monet" (key))
 (declare-function monet-add-claude-hook-handler "monet" (handler))
 (declare-function monet-remove-claude-hook-handler "monet" (handler))
 (defvar monet--sessions)
 (defvar baton-executor-guest-path-mappings)
+(defvar baton-executor-guest-pid)
 (defvar monet-open-diff-tool-schema nil
   "MCP inputSchema for the openDiff tool (provided by monet).")
 
@@ -75,9 +76,13 @@ Also calls `baton-session-set-status' so the change is applied immediately."
 Wraps `monet-start-server-function', forwarding any executor-declared
 guest path mappings (`baton-executor-guest-path-mappings') so monet can
 translate protocol paths and advertise the guest workspace folder in
-its IDE lockfile."
+its IDE lockfile, and the executor's guest pid
+\(`baton-executor-guest-pid') so the lockfile advertises a pid that is
+alive where Claude runs (nil for host execution: monet then uses
+`emacs-pid')."
   (monet-start-server-function session-name directory
-                                baton-executor-guest-path-mappings))
+                                baton-executor-guest-path-mappings
+                                baton-executor-guest-pid))
 
 (defun baton-monet--session-env-function (session-name _directory)
   "Return env vars injecting SESSION-NAME into the Claude Code process environment.

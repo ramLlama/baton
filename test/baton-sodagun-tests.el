@@ -306,21 +306,26 @@ Binds `wt-calls', `start-calls', and an isolated
                        '(("/root" nil "/repo/custom-sodagun.toml"))))))))
 
 (ert-deftest baton-test-sodagun-resolve-binds-guest-path-mappings ()
-  "Resolve exposes the worktree-to-guest mapping to env-functions."
+  "Resolve exposes the worktree-to-guest mapping and guest pid to env-functions.
+The guest pid is 1: the agent runs in the sandbox's pid namespace,
+where host pids do not exist but init always does."
   (baton-test-with-clean-state
     (baton-sodagun-test--with-executor-stubs
-      (let (seen-mappings)
+      (let (seen-mappings seen-guest-pid)
         (baton-define-agent
          :name 'sbx-agent :command "cmd" :status-function-trigger :periodic
          :env-functions (list (lambda (_k _d)
                                 (setq seen-mappings
-                                      baton-executor-guest-path-mappings)
+                                      baton-executor-guest-path-mappings
+                                      seen-guest-pid
+                                      baton-executor-guest-pid)
                                 nil)))
         (let ((s (baton-session-create :agent 'sbx-agent :command "claude"
                                        :directory "/repo" :name "sbx-guest"
                                        :executor 'sodagun)))
           (baton-executor--resolve 'sodagun s)
-          (should (equal seen-mappings '(("/work/feat" . "/workspace")))))))))
+          (should (equal seen-mappings '(("/work/feat" . "/workspace"))))
+          (should (equal seen-guest-pid 1)))))))
 
 (ert-deftest baton-test-sodagun-resolve-auto-branch ()
   "Sandbox without an explicit branch derives one from the session name."

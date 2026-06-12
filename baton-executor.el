@@ -29,6 +29,14 @@ the session's directory appears inside the guest — e.g.
 IDE lockfile and protocol path translation) can map paths in both
 directions.  Nil for host execution.")
 
+(defvar baton-executor-guest-pid nil
+  "A pid that is alive in the agent's pid namespace, or nil for host execution.
+Sandboxed executors bind this (dynamically, around agent env-function
+evaluation) to a pid valid inside the guest — 1, the guest's init —
+because host pids (e.g. `emacs-pid') do not exist there.  Integrations
+that advertise a liveness pid to the agent (monet's IDE lockfile) use
+it; nil means the agent shares Emacs's pid namespace.")
+
 (cl-defgeneric baton-executor--resolve (executor session)
   "Perform pre-spawn setup for SESSION under EXECUTOR.
 Returns a plist (:directory DIR :command CMD :extra-env ENV).  DIR is the

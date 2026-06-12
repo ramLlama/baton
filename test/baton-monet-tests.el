@@ -330,15 +330,29 @@ and bidirectional protocol path translation."
   (baton-test-with-clean-state
     (let (seen-args)
       (cl-letf (((symbol-function 'monet-start-server-function)
-                 (lambda (key dir &optional mappings)
-                   (setq seen-args (list key dir mappings))
+                 (lambda (key dir &optional mappings lockfile-pid)
+                   (setq seen-args (list key dir mappings lockfile-pid))
                    '(:env ("X=1") :ports (1)))))
         (let ((baton-executor-guest-path-mappings
-               '(("/work/feat" . "/workspace"))))
+               '(("/work/feat" . "/workspace")))
+              (baton-executor-guest-pid 1))
           (baton-monet--start-server-env-function "claude-1" "/work/feat"))
         (should (equal seen-args
                        '("claude-1" "/work/feat"
-                         (("/work/feat" . "/workspace")))))))))
+                         (("/work/feat" . "/workspace")) 1)))))))
+
+(ert-deftest baton-test-monet-start-server-env-fn-host-defaults ()
+  "Host execution forwards nil mappings and nil guest pid.
+With both nil, monet falls back to its defaults (no path translation,
+`emacs-pid' in the lockfile)."
+  (baton-test-with-clean-state
+    (let (seen-args)
+      (cl-letf (((symbol-function 'monet-start-server-function)
+                 (lambda (key dir &optional mappings lockfile-pid)
+                   (setq seen-args (list key dir mappings lockfile-pid))
+                   '(:env ("X=1") :ports (1)))))
+        (baton-monet--start-server-env-function "claude-1" "/proj")
+        (should (equal seen-args '("claude-1" "/proj" nil nil)))))))
 
 (ert-deftest baton-test-monet-session-killed-stops-monet-session ()
   "Killing a baton session stops its monet session (server + lockfile).

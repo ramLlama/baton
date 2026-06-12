@@ -234,10 +234,13 @@ worktree kept) before the error propagates."
                (rootdir (car worktree))
                (worktree-path (cdr worktree))
                ;; Env-functions see how the worktree maps into the guest
-               ;; (monet uses it for lockfile folders + path translation).
+               ;; (monet uses it for lockfile folders + path translation)
+               ;; and a guest-valid liveness pid (host pids don't exist in
+               ;; the sandbox's pid namespace; init does).
                (agent-env (let ((baton-executor-guest-path-mappings
                                  (list (cons worktree-path
-                                             baton-sodagun-guest-workdir))))
+                                             baton-sodagun-guest-workdir)))
+                                (baton-executor-guest-pid 1))
                             (baton-executor--agent-env session worktree-path)))
                (env (plist-get agent-env :env))
                (ports (plist-get agent-env :ports)))
