@@ -2,15 +2,15 @@
 
 ## What This Project Does
 
-Baton is an Emacs Lisp package for managing multiple AI coding agents (Claude Code, Aider, Codex, Gemini CLI, etc.) from a unified interface inside Emacs. Agents run in vterm terminal buffers. Baton monitors their output for status transitions (running/waiting/idle) and surfaces status via a modeline badge, a tabulated-list status buffer, and optional OS notifications.
+Baton is an Emacs Lisp package for managing multiple AI coding agents (Claude Code, Aider, Codex, Gemini CLI, etc.) from a unified interface inside Emacs. Agents run in terminal buffers (eat by default; vterm and ghostel also supported). Baton monitors their output for status transitions (running/waiting/idle) and surfaces status via a modeline badge, a tabulated-list status buffer, and optional OS notifications.
 
 ## Tech Stack
 
 - **Language**: Emacs Lisp (lexical-binding throughout)
-- **Emacs minimum**: 29.1
-- **Required dependency**: vterm (>= 0.0.2) -- agents run in vterm buffers
-- **Optional dependency**: monet (sibling repo at `../monet`) -- diff review integration (works inside sodagun sandboxes via the executor's port forwarders, given host-side guest provisioning)
-- **Optional CLI**: sodagun (external binary on `exec-path`) -- git-worktree-based sessions and microVM sandbox sessions (the `sodagun` executor)
+- **Emacs minimum**: 30.1
+- **Required dependencies**: transient, inheritenv
+- **Terminal backends**: eat (default), vterm, ghostel -- selected via `baton-terminal-backend`
+- **Optional dependency**: monet (sibling repo at `../monet`) -- diff review integration
 - **Testing**: ERT (Emacs Regression Testing framework)
 - **Build**: GNU Make (`make checkdoc`, `make compile`, `make test`)
 
@@ -20,11 +20,12 @@ Baton is an Emacs Lisp package for managing multiple AI coding agents (Claude Co
 baton/
   baton-session.el    -- Session struct (cl-defstruct), hash-table registries, lifecycle hooks
   baton-executor.el   -- Execution-environment abstraction: executor generics (resolve/teardown), agent-env aggregation, reference `exec` executor
-  baton-process.el    -- vterm spawning, 500ms debounced output watcher, pure pattern matcher
+  baton-term.el       -- Terminal backend abstraction (eat / vterm / ghostel)
+  baton-process.el    -- Agent spawning, 500ms debounced output watcher, pure pattern matcher
   baton-notify.el     -- Modeline segment B[Nw/Ni/Nr N*], *Baton* tabulated-list buffer, baton-jump
   baton-alert.el      -- Desktop alert backend registry: alerter, OSC 777, D-Bus/toast, echo fallback
   baton-monet.el      -- Optional monet integration: openDiff override, event-driven status via hook handler
-  baton-sodagun.el    -- Optional sodagun CLI integration: synchronous JSON wrapper, worktree creation for baton-new, and the `sodagun` executor (worktree + microVM sandbox + port forwarders)
+  baton-logging.el    -- Advice-based debug logging
   baton.el            -- Agent registry, baton-mode global minor mode, user commands, keymaps
   test/
     baton-test-helpers.el   -- Shared ERT macros (baton-test-with-clean-state, baton-alert-test-with-clean-state)
@@ -32,8 +33,8 @@ baton/
     baton-process-tests.el  -- Agent registry, status-function dispatch, env-functions
     baton-notify-tests.el   -- Modeline, timers, status buffer, error/other notify
     baton-monet-tests.el    -- Monet diff workflow
-    baton-sodagun-tests.el  -- sodagun JSON wrapper, worktree creation, baton-new worktree/sandbox path, sodagun executor resolve/teardown (all stub the CLI)
     baton-alert-tests.el    -- Alert backends
+    baton-term-tests.el     -- Terminal backend abstraction
   Makefile             -- checkdoc / compile / test / pre-commit targets; TEST_FILES variable
   .gitignore           -- *.elc
   .claude/
@@ -42,6 +43,7 @@ baton/
     architecture.md     -- Output watcher, notification surface, monet integration
     gotchas.md          -- Critical idiosyncrasies and non-obvious behaviors
     commands.md         -- User commands and transient dispatch reference
+    learnings.md        -- Append-only session learnings
     settings.local.json -- Allowed bash commands for Claude Code
 ```
 
@@ -55,14 +57,13 @@ Strict require chain -- each file requires only what it needs:
 4. `baton-notify` -- requires `baton-session`
 5. `baton-alert` -- requires `baton-session`, `baton-notify`
 6. `baton-monet` -- requires `baton-session` (monet symbols are `declare-function` only)
-7. `baton-sodagun` -- requires `baton-session`, `baton-executor` (optional; loaded by `baton-mode` only when the `sodagun` binary is found)
-8. `baton` -- requires `baton-session`, `baton-process`, `baton-notify`, `baton-alert`; conditionally loads `baton-monet` and `baton-sodagun` (sodagun symbols are `declare-function` only)
+7. `baton` -- requires `baton-session`, `baton-process`, `baton-notify`, `baton-alert`; conditionally loads `baton-monet`
 
 ## Development Workflow
 
 ### Install dependencies
 
-Ensure `vterm` is installed in your Emacs. Optionally clone monet to `../monet`.
+Install `transient`, `inheritenv` and your terminal backend (eat by default). Optionally clone monet to `../monet`.
 
 ### Run tests
 
@@ -99,7 +100,7 @@ M-x ert RET baton-test-session-create-returns-struct RET
 - All `defvar` and `defun` have docstrings (enforced by `make checkdoc`)
 - `cl-lib` is used throughout (`cl-defstruct`, `cl-defun`, `cl-find`, `cl-remove-if-not`, `cl-letf`)
 - `when-let*` is preferred over nested `when`/`let` for nil-guarded bindings
-- No `require 'vterm` at top level -- only inside functions that need it (`baton-process-spawn`)
+- No top-level `require` of a terminal backend -- `baton-term.el` loads it inside the functions that need it
 - Optional dependencies use `declare-function` for byte-compiler silence + `featurep` guards at runtime
 - `:status-function` returns `(SYMBOL . REASON)` where SYMBOL is a plain symbol (`waiting`, `idle`, `running`, `error`, `other`), not a keyword. Pattern alists use the same convention: `(REGEXP . (SYMBOL . REASON))`.
 - `:env-functions` each take `(SESSION-NAME DIRECTORY)` and MUST return a plist `(:env STRINGS :ports PORTS)` (or nil for no contribution). `:env` is a list of `"VAR=VALUE"` strings; `:ports` is a list of host ports the agent must reach. Any other shape (e.g., a bare list of `"VAR=VALUE"` strings) is a hard error -- see [domain-model.md](domain-model.md).
@@ -109,5 +110,5 @@ M-x ert RET baton-test-session-create-returns-struct RET
 
 - **[domain-model.md](domain-model.md)** -- Session struct, agent registry, status observation, unread tracking, alert backends, hooks
 - **[architecture.md](architecture.md)** -- Output watcher algorithm, notification surface, monet integration
-- **[gotchas.md](gotchas.md)** -- Critical idiosyncrasies and non-obvious behaviors (34 items)
+- **[gotchas.md](gotchas.md)** -- Critical idiosyncrasies and non-obvious behaviors (22 items)
 - **[commands.md](commands.md)** -- User commands and transient dispatch keybindings

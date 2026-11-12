@@ -301,10 +301,8 @@ Even when the terminal output matches a different waiting pattern (e.g.
 
 (ert-deftest baton-test-monet-setup-registers-env-functions ()
   "`baton-monet-setup' registers both env-functions on claude-code, in order.
-The order matters for the sandbox path: the server env-function
-contributes the MCP + hook :ports (driving the executor's forwarders)
-and its :env leads the attach --env list, followed by the
-MONET_CTX_baton_session injection."
+The order matters: the server env-function contributes the MCP + hook
+:ports and its :env precedes the MONET_CTX_baton_session injection."
   (skip-unless (featurep 'monet))
   (baton-test-with-clean-state
     (baton-define-agent :name 'claude-code :command "claude"
@@ -324,7 +322,7 @@ MONET_CTX_baton_session injection."
 
 (ert-deftest baton-test-monet-start-server-env-fn-passes-path-mappings ()
   "The server env-function forwards executor-declared path mappings.
-Executors (the sodagun one) bind `baton-executor-guest-path-mappings'
+Executors bind `baton-executor-guest-path-mappings'
 around env evaluation; monet uses them for lockfile workspace folders
 and bidirectional protocol path translation."
   (baton-test-with-clean-state

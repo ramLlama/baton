@@ -366,6 +366,18 @@ caller's environment was polluted with per-session vars."
 
 ;;; ─── executor dispatch tests ───────────────────────────────────────────────
 
+(ert-deftest baton-test-new-uses-given-directory ()
+  "`baton-new' runs the session in the given directory under `exec'."
+  (baton-test-with-clean-state
+    (baton-define-agent :name 'plain-agent :command "cmd"
+                        :status-function-trigger :periodic)
+    (cl-letf (((symbol-function 'baton-process-spawn) #'ignore)
+              ((symbol-function 'pop-to-buffer) #'ignore))
+      (let ((session (baton-new "plain-agent" "/repo")))
+        (should (equal (baton--session-directory session)
+                       (expand-file-name "/repo")))
+        (should (eq (baton--session-executor session) 'exec))))))
+
 (ert-deftest baton-test-session-executor-defaults-to-exec ()
   "`baton-session-create' defaults the executor slot to `exec'."
   (baton-test-with-clean-state

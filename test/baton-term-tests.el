@@ -66,7 +66,7 @@
 ;;; ─── Shell wrapping tests ────────────────────────────────────────────────────
 ;;
 ;; COMMAND is a POSIX shell command string and may contain multiple words
-;; (e.g. "sodagun sandbox attach <dir> -- claude").  eat and ghostel exec a
+;; (e.g. "env FOO=1 claude --resume").  eat and ghostel exec a
 ;; PROGRAM + ARGS directly, so the activate methods must wrap COMMAND in
 ;; /bin/sh -c; vterm shell-wraps internally via vterm-shell.
 
@@ -81,9 +81,9 @@
                      (lambda (_buf _name cmd _sf args)
                        (setq captured (cons cmd args)))))
             (baton-term--activate 'eat buf "/tmp"
-                                  "sodagun sandbox attach /x -- claude"))
+                                  "env FOO=1 claude --resume"))
           (should (equal captured
-                         '("/bin/sh" . ("-c" "sodagun sandbox attach /x -- claude")))))
+                         '("/bin/sh" . ("-c" "env FOO=1 claude --resume")))))
       (kill-buffer buf))))
 
 (ert-deftest baton-test-term-ghostel-shell-wraps-command ()
@@ -97,9 +97,9 @@
                      (lambda (_buf program args)
                        (setq captured (cons program args)))))
             (baton-term--activate 'ghostel buf "/tmp"
-                                  "sodagun sandbox attach /x -- claude"))
+                                  "env FOO=1 claude --resume"))
           (should (equal captured
-                         '("/bin/sh" . ("-c" "sodagun sandbox attach /x -- claude")))))
+                         '("/bin/sh" . ("-c" "env FOO=1 claude --resume")))))
       (kill-buffer buf))))
 
 ;;; ─── Config override test ────────────────────────────────────────────────────
