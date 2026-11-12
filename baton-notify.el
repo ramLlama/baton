@@ -314,7 +314,7 @@ Returns non-nil if the notification was fired."
 
 (defvar baton-list-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "m")   #'baton-list-mark)
+    (define-key map (kbd "m")   #'baton-list-flag-delete)
     (define-key map (kbd "u")   #'baton-list-unmark)
     (define-key map (kbd "U")   #'baton-list-unmark-all)
     (define-key map (kbd "d")   #'baton-list-flag-delete)
@@ -367,11 +367,6 @@ Returns non-nil if the notification was fired."
     (baton-list-refresh)
     (forward-line 1)))
 
-(defun baton-list-mark ()
-  "Mark the session at point."
-  (interactive)
-  (baton-list-flag-delete))
-
 (defun baton-list-unmark ()
   "Remove mark from the session at point."
   (interactive)
@@ -408,11 +403,9 @@ Returns non-nil if the notification was fired."
 
 ;;; baton-jump (completing-read navigation)
 
-(defun baton--jump-annotation (name sessions)
-  "Return an annotation string for session NAME from SESSIONS list."
-  (when-let* ((session (cl-find name sessions
-                                :key #'baton--session-name
-                                :test #'equal)))
+(defun baton--jump-annotation (name)
+  "Return an annotation string for session NAME."
+  (when-let* ((session (baton-session-get name)))
     (let ((status (baton--session-status session))
           (reason (baton--session-waiting-reason session)))
       (format "  [%s%s]"
@@ -426,12 +419,9 @@ SESSIONS defaults to all sessions."
   (let* ((all (or sessions (baton-session-list)))
          (names (mapcar #'baton--session-name all))
          (completion-extra-properties
-          (list :annotation-function
-                (lambda (n) (baton--jump-annotation n all))))
+          (list :annotation-function #'baton--jump-annotation))
          (chosen (completing-read "Jump to agent: " names nil t)))
-    (when-let* ((session (cl-find chosen all
-                                  :key #'baton--session-name
-                                  :test #'equal))
+    (when-let* ((session (baton-session-get chosen))
                 (buf (baton--session-buffer session)))
       (if (buffer-live-p buf)
           (pop-to-buffer buf)
