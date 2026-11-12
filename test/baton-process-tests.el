@@ -520,6 +520,29 @@ caller's environment was polluted with per-session vars."
         (baton-executor--agent-env s "/elsewhere")
         (should (equal seen '("my-session" "/elsewhere")))))))
 
+;;; ─── built-in claude-code agent env ────────────────────────────────────────
+
+(defun baton-test--builtin-claude-code-env (fullscreen)
+  "Return the built-in claude-code agent's aggregate :env.
+FULLSCREEN is bound as `baton-claude-code-fullscreen' during evaluation."
+  (let ((def (gethash 'claude-code baton-agents)))
+    (baton-test-with-clean-state
+      (puthash 'claude-code def baton-agents)
+      (let ((baton-claude-code-fullscreen fullscreen)
+            (s (baton-session-create :agent 'claude-code :command "claude"
+                                     :directory "/tmp")))
+        (plist-get (baton-executor--agent-env s "/tmp") :env)))))
+
+(ert-deftest baton-test-claude-code-fullscreen-enabled ()
+  "Claude Code sessions get the fullscreen renderer env when enabled."
+  (should (member "CLAUDE_CODE_NO_FLICKER=1"
+                  (baton-test--builtin-claude-code-env t))))
+
+(ert-deftest baton-test-claude-code-fullscreen-disabled ()
+  "Claude Code sessions get no fullscreen renderer env when disabled."
+  (should-not (cl-some (lambda (s) (string-prefix-p "CLAUDE_CODE_NO_FLICKER=" s))
+                       (baton-test--builtin-claude-code-env nil))))
+
 ;;; ─── executor dispatch tests ───────────────────────────────────────────────
 
 (ert-deftest baton-test-session-executor-defaults-to-exec ()

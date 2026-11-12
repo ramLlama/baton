@@ -94,12 +94,41 @@ AGENT is a symbol key in `baton-agents'."
                           (append (plist-get def :env-functions) (list fn)))
                baton-agents))))
 
+;;; Customization Group
+
+(defgroup baton nil
+  "Manage multiple AI coding agents from Emacs."
+  :group 'external
+  :prefix "baton-")
+
 ;;; Built-in Agents
+
+(defcustom baton-claude-code-fullscreen t
+  "When non-nil, run Claude Code sessions in its fullscreen renderer.
+Fullscreen mode draws on the terminal's alternate screen and owns its
+transcript, so the mouse wheel scrolls Claude's history and a window resize
+re-renders it at the new width.  The default renderer writes into the
+terminal scrollback, which the terminal reflows on resize, mangling tables
+and wrapped text.  In fullscreen mode, copy mode only covers the visible
+screen.
+Read at spawn time; affects new sessions only."
+  :type 'boolean
+  :group 'baton)
+
+(defconst baton--claude-code-fullscreen-env "CLAUDE_CODE_NO_FLICKER=1"
+  "Environment assignment that enables Claude Code's fullscreen renderer.")
+
+(defun baton--claude-code-env (_name _directory)
+  "Return Claude Code's env plist per `baton-claude-code-fullscreen'.
+Delivered as an env-function so sandboxed executors pass it to the guest."
+  (when baton-claude-code-fullscreen
+    (list :env (list baton--claude-code-fullscreen-env))))
 
 (baton-define-agent
  :name 'claude-code
  :command "claude"
  :args '()
+ :env-functions (list #'baton--claude-code-env)
  :status-function-trigger :periodic
  ;; Claude blinks a status glyph in front of a pending tool call, in place
  ;; of the two-space indent, for as long as its permission prompt is open.
@@ -132,13 +161,6 @@ AGENT is a symbol key in `baton-agents'."
  :status-function (baton-process-make-regex-status-function
                    '(("^> " . (waiting . "input prompt"))
                      ("\\[y/N\\]" . (waiting . "confirmation")))))
-
-;;; Customization Group
-
-(defgroup baton nil
-  "Manage multiple AI coding agents from Emacs."
-  :group 'external
-  :prefix "baton-")
 
 (defcustom baton-default-agent nil
   "Default agent used by `baton-new' when no prefix argument is given.
