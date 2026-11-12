@@ -20,8 +20,11 @@ A hash-table (`eq` test) mapping agent symbols to definition plists. Each plist 
 - `:status-function` -- optional function `(SESSION) -> (cons SYMBOL REASON) | nil`. Receives a `baton--session` struct; call `baton-process-session-tail` internally to get buffer text if needed. SYMBOL is a plain symbol (`waiting`, `error`, `other`, `running`, `idle`) -- not a keyword. `nil` also means idle. `baton-process-make-regex-status-function` builds a pattern-based status function (calls `baton-process-session-tail` automatically); its alist format is `(REGEXP . (SYMBOL . REASON))`.
 - `:status-function-trigger` -- required symbol: `:periodic` (watcher calls status function each tick) or `:on-event` (status function is driven by external hooks, not the watcher). `baton-define-agent` validates this value and signals an error for anything else.
 - `:env-functions` -- list of functions, each `(SESSION-NAME DIRECTORY) -> (:env STRINGS :ports PORTS) | nil`. `:env` is a list of `"VAR=VALUE"` strings injected into the agent's environment; `:ports` is a list of host ports the agent process must be able to reach. Returning nil contributes nothing. **Any other return shape (including a bare list of `"VAR=VALUE"` strings) is a hard error** -- the contract is enforced fail-fast in `baton-executor--agent-env`, with no legacy tolerance. Append functions with `baton-add-env-function` (idempotent).
+- `:output-ignore-regexp` -- optional regexp. The watcher deletes its matches from the buffer tail before hashing, so cosmetic output (a blinking glyph) does not count as a change and reset the session to `running`. Status functions still see the raw text. `claude-code` uses `"^[●⏺ ] "` for the glyph Claude blinks in front of a pending tool call.
 
 Register new agents with `baton-define-agent`. Three built-in: `claude-code`, `aider`, `codex` (all `:periodic`).
+
+The built-in `claude-code` agent ships one env-function, `baton--claude-code-env`, which adds `CLAUDE_CODE_NO_FLICKER=1` (Claude's fullscreen alt-screen renderer) while `baton-claude-code-fullscreen` is non-nil (default t). The defcustom is read at spawn time. Monet's env-function is appended after it by `baton-add-env-function`.
 
 ## Session Registries
 

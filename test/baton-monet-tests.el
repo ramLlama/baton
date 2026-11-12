@@ -327,7 +327,8 @@ around env evaluation; monet uses them for lockfile workspace folders
 and bidirectional protocol path translation."
   (baton-test-with-clean-state
     (let (seen-args)
-      (cl-letf (((symbol-function 'monet-start-server-function)
+      (cl-letf (((symbol-function 'monet-claude-hooks-installed-p) (lambda () t))
+                ((symbol-function 'monet-start-server-function)
                  (lambda (key dir &optional mappings lockfile-pid)
                    (setq seen-args (list key dir mappings lockfile-pid))
                    '(:env ("X=1") :ports (1)))))
@@ -345,7 +346,8 @@ With both nil, monet falls back to its defaults (no path translation,
 `emacs-pid' in the lockfile)."
   (baton-test-with-clean-state
     (let (seen-args)
-      (cl-letf (((symbol-function 'monet-start-server-function)
+      (cl-letf (((symbol-function 'monet-claude-hooks-installed-p) (lambda () t))
+                ((symbol-function 'monet-start-server-function)
                  (lambda (key dir &optional mappings lockfile-pid)
                    (setq seen-args (list key dir mappings lockfile-pid))
                    '(:env ("X=1") :ports (1)))))
@@ -394,6 +396,27 @@ Without this, monet servers and lockfiles leak across baton sessions."
           (should (eq (plist-get def :status-function-trigger) :periodic))
           (should (eq (plist-get def :status-function) original-fn)))
         (should-not (memq #'baton-monet--claude-hook-handler monet--claude-hook-functions))))))
+
+;;; ─── Claude hooks precondition ──────────────────────────────────────────────
+
+(ert-deftest baton-test-monet-server-env-requires-claude-hooks ()
+  "Spawning without monet's Claude hooks installed fails before starting a server.
+Without the hooks, hook-driven status never leaves `running'."
+  (let (server-started)
+    (cl-letf (((symbol-function 'monet-claude-hooks-installed-p) (lambda () nil))
+              ((symbol-function 'monet-start-server-function)
+               (lambda (&rest _) (setq server-started t) nil)))
+      (should-error (baton-monet--start-server-env-function "claude-1" "/proj")
+                    :type 'user-error)
+      (should-not server-started))))
+
+(ert-deftest baton-test-monet-server-env-starts-server-with-hooks ()
+  "With monet's Claude hooks installed, the env-function starts the server."
+  (cl-letf (((symbol-function 'monet-claude-hooks-installed-p) (lambda () t))
+            ((symbol-function 'monet-start-server-function)
+             (lambda (&rest _) '(:env ("MONET_HOOK_PORT=1") :ports (1)))))
+    (should (equal (baton-monet--start-server-env-function "claude-1" "/proj")
+                   '(:env ("MONET_HOOK_PORT=1") :ports (1))))))
 
 (provide 'baton-monet-tests)
 ;;; baton-monet-tests.el ends here

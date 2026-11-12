@@ -82,6 +82,19 @@ Skip the agent prompt on every spawn by setting a default:
 
 Or set it interactively via `-d` in the transient menu. With a prefix argument (`C-u n`), you'll still be prompted.
 
+### Claude Code Fullscreen Renderer
+
+By default, `claude-code` sessions run Claude Code's fullscreen renderer
+(`CLAUDE_CODE_NO_FLICKER=1`). Claude then owns its transcript: the mouse
+wheel scrolls Claude's history, and a window resize re-renders it at the new
+width. The default renderer writes into the terminal scrollback, which the
+terminal reflows on resize, mangling tables and wrapped text. Copy mode only
+covers the visible screen in fullscreen mode. To opt out:
+
+```elisp
+(setq baton-claude-code-fullscreen nil)
+```
+
 ### Defining Custom Agents
 
 Register any CLI tool as a baton agent:

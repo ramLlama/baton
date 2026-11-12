@@ -110,5 +110,5 @@ M-x ert RET baton-test-session-create-returns-struct RET
 
 - **[domain-model.md](domain-model.md)** -- Session struct, agent registry, status observation, unread tracking, alert backends, hooks
 - **[architecture.md](architecture.md)** -- Output watcher algorithm, notification surface, monet integration
-- **[gotchas.md](gotchas.md)** -- Critical idiosyncrasies and non-obvious behaviors (22 items)
+- **[gotchas.md](gotchas.md)** -- Critical idiosyncrasies and non-obvious behaviors (26 items)
 - **[commands.md](commands.md)** -- User commands and transient dispatch keybindings

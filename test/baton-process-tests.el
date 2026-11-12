@@ -151,6 +151,162 @@
               (should (floatp (plist-get state :at)))))
         (kill-buffer buf)))))
 
+;;; ─── user input resets status ──────────────────────────────────────────────
+
+(ert-deftest baton-test-on-input-ghostel-non-printing-key-resets-running ()
+  "RET, arrows and other non-printing keys in ghostel count as input.
+Approving a permission prompt is a RET; it must clear `waiting'."
+  (baton-test-with-clean-state
+    (let ((s (baton-session-create :agent 'claude-code :command "claude"
+                                   :directory "/tmp"))
+          (baton-terminal-backend 'ghostel)
+          (this-command 'ghostel--send-event))
+      (baton-session-set-status s 'waiting "permission")
+      (with-temp-buffer
+        (setq-local baton--current-session s)
+        (baton-process--on-input))
+      (should (eq (baton--session-status s) 'running)))))
+
+;;; ─── :output-ignore-regexp tests ────────────────────────────────────────────
+
+(defun baton-test--settle (session)
+  "Tick SESSION's watcher, then tick again as if its output has been quiet."
+  (baton-process--state-tick session)
+  (setf (baton--session-metadata session)
+        (plist-put (baton--session-metadata session)
+                   :last-output-time (- (float-time) 10.0)))
+  (baton-process--state-tick session))
+
+(defun baton-test--replace-buffer (buf text)
+  "Replace BUF's contents with TEXT."
+  (with-current-buffer buf (erase-buffer) (insert text)))
+
+(defmacro baton-test--with-ignore-agent (session buf &rest body)
+  "Run BODY with SESSION waiting on agent `blink-agent' showing BUF.
+The agent ignores a leading \"* \" or \"  \" and always reports waiting."
+  (declare (indent 2))
+  `(baton-test-with-clean-state
+     (baton-define-agent
+      :name 'blink-agent :command "cmd" :status-function-trigger :periodic
+      :output-ignore-regexp "^[* ] "
+      :status-function (lambda (_s) '(waiting . "prompt")))
+     (let ((,session (baton-session-create :agent 'blink-agent :command "cmd"
+                                           :directory "/tmp"))
+           (,buf (generate-new-buffer " *baton-test-ignore*")))
+       (unwind-protect
+           (progn
+             (baton-test--replace-buffer ,buf "* Waiting on tool\nAllow?")
+             (setf (baton--session-buffer ,session) ,buf)
+             (baton-test--settle ,session)
+             (should (eq (baton--session-status ,session) 'waiting))
+             ,@body)
+         (kill-buffer ,buf)))))
+
+(ert-deftest baton-test-output-ignore-regexp-masks-cosmetic-change ()
+  "Output changes confined to ignored text do not reset waiting to running."
+  (baton-test--with-ignore-agent s buf
+    (baton-test--replace-buffer buf "  Waiting on tool\nAllow?")
+    (baton-process--state-tick s)
+    (should (eq (baton--session-status s) 'waiting))))
+
+(ert-deftest baton-test-output-ignore-regexp-keeps-real-change ()
+  "Output changes outside ignored text still mark the session running."
+  (baton-test--with-ignore-agent s buf
+    (baton-test--replace-buffer buf "* Waiting on tool\nDone.")
+    (baton-process--state-tick s)
+    (should (eq (baton--session-status s) 'running))))
+
+;;; ─── built-in claude-code status detection ─────────────────────────────────
+
+(defconst baton-test--claude-idle-screen
+  "● Here are the numbers.
+
+✻ Worked for 18s · done 8:32 PM
+
+────────────────────────────────────────
+❯ \n────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)
+"
+  "Claude Code (2.1.322, fullscreen) at its input prompt after a turn.")
+
+(defconst baton-test--claude-permission-screen
+  "● Waiting 8 seconds then writing hi to out.txt
+────────────────────────────────────────
+ Bash command
+ sleep 8 && echo hi > out.txt
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow access to /tmp/proj from this project
+   4. No
+ Esc to cancel · Tab to amend
+"
+  "Claude Code (2.1.322, fullscreen) showing a Bash permission prompt.")
+
+(defun baton-test--builtin-claude-code-settled-status (text &optional blink-text)
+  "Return the built-in claude-code agent's settled status showing TEXT.
+When BLINK-TEXT is non-nil, the buffer then changes to it for one more tick."
+  (let ((def (gethash 'claude-code baton-agents)))
+    (baton-test-with-clean-state
+      (puthash 'claude-code def baton-agents)
+      (let ((s (baton-session-create :agent 'claude-code :command "claude"
+                                     :directory "/tmp"))
+            (buf (generate-new-buffer " *baton-test-claude*")))
+        (unwind-protect
+            (progn
+              (baton-test--replace-buffer buf text)
+              (setf (baton--session-buffer s) buf)
+              (baton-test--settle s)
+              (when blink-text
+                (baton-test--replace-buffer buf blink-text)
+                (baton-process--state-tick s))
+              (baton--session-status s))
+          (kill-buffer buf))))))
+
+(ert-deftest baton-test-claude-code-idle-at-prompt ()
+  "Claude Code at its input prompt after a turn is idle, not waiting."
+  (should (eq (baton-test--builtin-claude-code-settled-status
+               baton-test--claude-idle-screen)
+              'idle)))
+
+(ert-deftest baton-test-claude-code-permission-prompt-waits ()
+  "Claude Code showing a permission prompt is waiting."
+  (should (eq (baton-test--builtin-claude-code-settled-status
+               baton-test--claude-permission-screen)
+              'waiting)))
+
+(ert-deftest baton-test-claude-code-permission-prompt-ignores-blink ()
+  "The blinking tool-status glyph does not flip a permission prompt to running."
+  (should (eq (baton-test--builtin-claude-code-settled-status
+               baton-test--claude-permission-screen
+               (concat "  " (substring baton-test--claude-permission-screen 2)))
+              'waiting)))
+
+;;; ─── baton-new spawn failure ────────────────────────────────────────────────
+
+(ert-deftest baton-test-new-spawn-failure-removes-session ()
+  "A failing spawn propagates its error and leaves no registered session."
+  (baton-test-with-clean-state
+    (baton-define-agent :name 'fail-agent :command "cmd"
+                        :status-function-trigger :periodic)
+    (cl-letf (((symbol-function 'baton-process-spawn)
+               (lambda (_s) (user-error "Spawn refused")))
+              ((symbol-function 'pop-to-buffer) #'ignore))
+      (should-error (baton-new "fail-agent" "/repo") :type 'user-error)
+      (should (null (baton-session-list))))))
+
+;; Exercises the real `baton-process-spawn' up to the terminal backend.
+(ert-deftest baton-test-new-terminal-failure-kills-buffer ()
+  "A terminal backend failure leaves neither a session nor its buffer."
+  (baton-test-with-clean-state
+    (baton-define-agent :name 'term-fail-agent :command "cmd"
+                        :status-function-trigger :periodic)
+    (cl-letf (((symbol-function 'baton-term-spawn-in-buffer)
+               (lambda (&rest _) (error "Terminal failed")))
+              ((symbol-function 'pop-to-buffer) #'ignore))
+      (should-error (baton-new "term-fail-agent" "/tmp" "tf-1"))
+      (should (null (baton-session-list)))
+      (should-not (get-buffer "*baton:tf-1*")))))
+
 ;;; ─── baton-process-spawn environment inheritance tests ──────────────────────
 
 (ert-deftest baton-test-spawn-inherits-buffer-local-process-environment ()
@@ -363,6 +519,29 @@ caller's environment was polluted with per-session vars."
                                      :directory "/tmp" :name "my-session")))
         (baton-executor--agent-env s "/elsewhere")
         (should (equal seen '("my-session" "/elsewhere")))))))
+
+;;; ─── built-in claude-code agent env ────────────────────────────────────────
+
+(defun baton-test--builtin-claude-code-env (fullscreen)
+  "Return the built-in claude-code agent's aggregate :env.
+FULLSCREEN is bound as `baton-claude-code-fullscreen' during evaluation."
+  (let ((def (gethash 'claude-code baton-agents)))
+    (baton-test-with-clean-state
+      (puthash 'claude-code def baton-agents)
+      (let ((baton-claude-code-fullscreen fullscreen)
+            (s (baton-session-create :agent 'claude-code :command "claude"
+                                     :directory "/tmp")))
+        (plist-get (baton-executor--agent-env s "/tmp") :env)))))
+
+(ert-deftest baton-test-claude-code-fullscreen-enabled ()
+  "Claude Code sessions get the fullscreen renderer env when enabled."
+  (should (member "CLAUDE_CODE_NO_FLICKER=1"
+                  (baton-test--builtin-claude-code-env t))))
+
+(ert-deftest baton-test-claude-code-fullscreen-disabled ()
+  "Claude Code sessions get no fullscreen renderer env when disabled."
+  (should-not (cl-some (lambda (s) (string-prefix-p "CLAUDE_CODE_NO_FLICKER=" s))
+                       (baton-test--builtin-claude-code-env nil))))
 
 ;;; ─── executor dispatch tests ───────────────────────────────────────────────
 

@@ -34,6 +34,7 @@
 (declare-function monet-start-server-function "monet"
                   (key directory &optional path-mappings lockfile-pid))
 (declare-function monet-stop-server "monet" (key))
+(declare-function monet-claude-hooks-installed-p "monet" ())
 (declare-function monet-add-claude-hook-handler "monet" (handler))
 (declare-function monet-remove-claude-hook-handler "monet" (handler))
 (defvar monet--sessions)
@@ -79,7 +80,11 @@ translate protocol paths and advertise the guest workspace folder in
 its IDE lockfile, and the executor's guest pid
 \(`baton-executor-guest-pid') so the lockfile advertises a pid that is
 alive where Claude runs (nil for host execution: monet then uses
-`emacs-pid')."
+`emacs-pid').
+Signals a `user-error' first when monet's Claude hooks are not installed:
+hook events are this integration's only status source for `claude-code'."
+  (unless (monet-claude-hooks-installed-p)
+    (user-error "baton-monet: Claude hooks not installed; run `monet-install-claude-hooks'"))
   (monet-start-server-function session-name directory
                                 baton-executor-guest-path-mappings
                                 baton-executor-guest-pid))
