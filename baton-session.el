@@ -132,12 +132,6 @@ for all others."
       (setf (baton--session-updated-at session) (float-time))
       (run-hook-with-args 'baton-session-status-changed-hook session old-status new-status))))
 
-(defun baton-session-find-by-directory (directory)
-  "Return the first session whose directory matches DIRECTORY, or nil."
-  (cl-find directory (hash-table-values baton--sessions)
-           :key #'baton--session-directory
-           :test #'equal))
-
 (defun baton-session-kill (session)
   "Kill SESSION: cancel its watcher, kill its buffer, remove from registry.
 Fires `baton-session-killed-hook'."

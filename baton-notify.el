@@ -130,7 +130,7 @@ waiting or in error.  Markers are controlled by `baton-marker-waiting',
                                 (when (> other       0) (format "%d%s" other       baton-marker-other))
                                 (when (> idle        0) (format "%d%s" idle        baton-marker-idle))
                                 (when (> running     0) (format "%d%s" running     baton-marker-running)))))
-             (counts (mapconcat #'identity parts "/"))
+             (counts (string-join parts "/"))
              (unread-str (if (> unread 0) (format " %d%s" unread baton-marker-unread) ""))
              (str (format " B[%s%s]" counts unread-str))
              (face (if (zerop (+ waiting error-count)) 'mode-line 'baton-face-modeline-alert))
@@ -158,10 +158,6 @@ waiting or in error.  Markers are controlled by `baton-marker-waiting',
     (setq global-mode-string
           (delete baton--modeline-segment global-mode-string))
     (force-mode-line-update t)))
-
-(defun baton-notify--update-modeline (&rest _)
-  "Refresh the modeline."
-  (force-mode-line-update t))
 
 (defcustom baton-notify-delay 5
   "Seconds to wait after a session needs attention before sending a notification."

@@ -117,8 +117,7 @@ Read at spawn time; affects new sessions only."
   "Environment assignment that enables Claude Code's fullscreen renderer.")
 
 (defun baton--claude-code-env (_name _directory)
-  "Return Claude Code's env plist per `baton-claude-code-fullscreen'.
-Delivered as an env-function so sandboxed executors pass it to the guest."
+  "Return Claude Code's env plist per `baton-claude-code-fullscreen'."
   (when baton-claude-code-fullscreen
     (list :env (list baton--claude-code-fullscreen-env))))
 
@@ -202,12 +201,9 @@ this setting."
    (list (completing-read "Kill session: "
                           (mapcar #'baton--session-name (baton-session-list))
                           nil t)))
-  (let ((session (cl-find session-name (baton-session-list)
-                           :key #'baton--session-name
-                           :test #'equal)))
-    (if session
-        (baton-session-kill session)
-      (message "baton: no session named %s" session-name))))
+  (if-let* ((session (baton-session-get session-name)))
+      (baton-session-kill session)
+    (message "baton: no session named %s" session-name)))
 
 (defun baton-kill-all ()
   "Kill all active sessions."
@@ -265,12 +261,9 @@ prompt is shown unless a prefix argument is given."
     (unless def
       (error "Unknown agent: %s" agent-name))
     (let* ((args (plist-get def :args))
-           (command (if args
-                        (mapconcat #'identity
-                                   (cons (plist-get def :command)
-                                         (mapcar #'shell-quote-argument args))
-                                   " ")
-                      (plist-get def :command)))
+           (command (string-join (cons (plist-get def :command)
+                                       (mapcar #'shell-quote-argument args))
+                                 " "))
            (session (baton-session-create
                      :agent agent
                      :command command
