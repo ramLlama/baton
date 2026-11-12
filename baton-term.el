@@ -51,6 +51,7 @@
 
 (defconst baton-term-ghostel-input-commands
   '(ghostel--self-insert          ; private but used only as a symbol for `memq', never called
+    ghostel--send-event            ; ditto; RET, arrows, ESC, TAB and other non-printing keys
     ghostel-send-string ghostel-send-key
     ghostel-send-C-c ghostel-send-C-z ghostel-send-C-d ghostel-send-C-backslash)
   "Commands in ghostel that count as user input for baton status-reset purposes.")
