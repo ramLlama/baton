@@ -1,11 +1,11 @@
-;;; baton-process.el --- Terminal spawning, output watching, input sending  -*- lexical-binding: t -*-
+;;; baton-process.el --- Terminal spawning and output watching  -*- lexical-binding: t -*-
 
 ;; Author: Ram Raghunathan
 ;; Keywords: tools, ai
 
 ;;; Commentary:
 ;; Handles spawning terminal processes for baton sessions, watching their output
-;; for status transitions (running -> waiting -> idle), and sending input.
+;; for status transitions (running -> waiting -> idle).
 ;;
 ;; Pattern matching functions are pure and have no terminal dependency,
 ;; making them fully unit-testable.
@@ -91,21 +91,6 @@ then launched in the configured terminal backend.  The buffer is named
     (baton-process--start-watcher session)
     buf))
 
-(defun baton-process-send-input (session string)
-  "Send STRING to SESSION's terminal buffer and reset status to running."
-  (when-let* ((buf (baton--session-buffer session)))
-    (when (buffer-live-p buf)
-      (baton-process--reset-to-running session)
-      (baton-term--send-string baton-terminal-backend buf string))))
-
-(defun baton-process-send-key (session key)
-  "Send KEY (a string like \"RET\") to SESSION's terminal buffer.
-Resets session status to running."
-  (when-let* ((buf (baton--session-buffer session)))
-    (when (buffer-live-p buf)
-      (baton-process--reset-to-running session)
-      (baton-term--send-key baton-terminal-backend buf key))))
-
 ;;; Input Detection
 
 (defun baton-process--on-buffer-killed ()
@@ -122,11 +107,6 @@ the buffer again (it is already being killed)."
       ;; Remove from registry and fire hook (buffer is already dying, skip kill-buffer)
       (remhash id baton--sessions)
       (run-hook-with-args 'baton-session-killed-hook session))))
-
-(defun baton-process--reset-to-running (session)
-  "Reset SESSION to `running' status if it is not already running."
-  (unless (eq (baton--session-status session) 'running)
-    (baton-session-set-status session 'running)))
 
 (defun baton-process--on-input ()
   "Reset session to `running' when the user sends input to the terminal.

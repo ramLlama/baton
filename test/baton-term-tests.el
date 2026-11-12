@@ -120,58 +120,5 @@
           (should called))
       (kill-buffer buf))))
 
-;;; ─── send-string test ────────────────────────────────────────────────────────
-
-(ert-deftest baton-test-term-send-string-eat ()
-  "`baton-term--send-string' for eat calls eat-term-send-string with eat-terminal."
-  (let* ((mock-terminal 'test-terminal)
-         (sent-terminal nil)
-         (sent-string nil)
-         (buf (get-buffer-create " *baton-term-test-send-str*")))
-    (unwind-protect
-        (progn
-          (with-current-buffer buf
-            (setq-local eat-terminal mock-terminal))
-          (cl-letf (((symbol-function 'eat-term-send-string)
-                     (lambda (term str)
-                       (setq sent-terminal term
-                             sent-string str))))
-            (baton-term--send-string 'eat buf "hello"))
-          (should (eq sent-terminal mock-terminal))
-          (should (equal sent-string "hello")))
-      (kill-buffer buf))))
-
-;;; ─── send-key translation tests ──────────────────────────────────────────────
-
-(ert-deftest baton-test-term-send-key-eat-ret ()
-  "`baton-term--send-key' for eat translates \"RET\" to the carriage-return byte."
-  (let* ((sent nil)
-         (buf (get-buffer-create " *baton-term-test-key-ret*")))
-    (unwind-protect
-        (progn
-          (with-current-buffer buf
-            (setq-local eat-terminal 'mock))
-          (cl-letf (((symbol-function 'eat-term-send-string)
-                     (lambda (_term str) (setq sent str))))
-            (baton-term--send-key 'eat buf "RET"))
-          (should (equal sent "\r")))
-      (kill-buffer buf))))
-
-(ert-deftest baton-test-term-send-key-ghostel-ctrl-c ()
-  "`baton-term--send-key' for ghostel translates the ctrl-c sequence to (ghostel-send-key \"c\" \"ctrl\")."
-  (let* ((sent-key nil)
-         (sent-mods nil)
-         (buf (get-buffer-create " *baton-term-test-key-ghostel*")))
-    (unwind-protect
-        (progn
-          (cl-letf (((symbol-function 'ghostel-send-key)
-                     (lambda (key mods)
-                       (setq sent-key key
-                             sent-mods mods))))
-            (baton-term--send-key 'ghostel buf "C-c"))
-          (should (equal sent-key "c"))
-          (should (equal sent-mods "ctrl")))
-      (kill-buffer buf))))
-
 (provide 'baton-term-tests)
 ;;; baton-term-tests.el ends here

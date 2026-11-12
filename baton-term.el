@@ -14,24 +14,18 @@
 ;;; External symbol declarations (byte-compiler hygiene; packages not required at load time)
 
 (defvar eat-kill-buffer-on-exit)
-(defvar eat-terminal)
 
 (declare-function eat-exec              "eat" (buffer name command startfile args))
-(declare-function eat-term-send-string "eat" (terminal string))
 
 (defvar vterm-shell)
 (defvar vterm-buffer-name-string)
 (defvar vterm--redraw-immediately)
 
 (declare-function vterm-mode        "vterm" ())
-(declare-function vterm-send-string "vterm" (string &optional paste-p))
-(declare-function vterm-send-key    "vterm" (key &optional shift meta ctrl))
 
 (defvar ghostel-set-title-function)
 
 (declare-function ghostel-exec        "ghostel" (buffer command args))
-(declare-function ghostel-send-string "ghostel" (string))
-(declare-function ghostel-send-key    "ghostel" (key mods))
 
 ;;; Input-command constants
 ;;
@@ -133,12 +127,6 @@ ghostel exec a PROGRAM + ARGS, so their activate methods wrap CMD in
 CMD is a POSIX shell command string (it may contain arguments and shell
 quoting, not just a program name).")
 
-(cl-defgeneric baton-term--send-string (backend buf string)
-  "Send STRING to terminal BACKEND in BUF.")
-
-(cl-defgeneric baton-term--send-key (backend buf key)
-  "Send KEY (named string like \"RET\" or \"TAB\") to terminal BACKEND in BUF.")
-
 ;;; Input-commands accessor
 
 (defun baton-term-input-commands (backend)
@@ -167,24 +155,6 @@ quoting, not just a program name).")
         (eat-exec buf (buffer-name buf) baton-term--shell nil (list "-c" cmd))
         (when post-fn (funcall post-fn))))))
 
-(cl-defmethod baton-term--send-string ((_backend (eql eat)) buf string)
-  "Send STRING to eat terminal in BUF."
-  (with-current-buffer buf
-    (eat-term-send-string eat-terminal string)))
-
-(cl-defmethod baton-term--send-key ((_backend (eql eat)) buf key)
-  "Send KEY to eat terminal in BUF."
-  (let ((seq (pcase key
-               ("RET" "\r")
-               ("TAB" "\t")
-               ("ESC" "\e")
-               ("C-c" "\C-c")
-               ("C-d" "\C-d")
-               ("C-z" "\C-z")
-               ("DEL" "\177")
-               (_     key))))
-    (baton-term--send-string 'eat buf seq)))
-
 ;;; ─── vterm backend ───────────────────────────────────────────────────────────
 
 (cl-defmethod baton-term--activate ((_backend (eql vterm)) buf dir cmd)
@@ -208,16 +178,6 @@ quoting, not just a program name).")
     (when post-fn
       (with-current-buffer buf (funcall post-fn)))))
 
-(cl-defmethod baton-term--send-string ((_backend (eql vterm)) buf string)
-  "Send STRING to vterm terminal in BUF."
-  (with-current-buffer buf
-    (vterm-send-string string)))
-
-(cl-defmethod baton-term--send-key ((_backend (eql vterm)) buf key)
-  "Send KEY to vterm terminal in BUF."
-  (with-current-buffer buf
-    (vterm-send-key key)))
-
 ;;; ─── ghostel backend ─────────────────────────────────────────────────────────
 
 (cl-defmethod baton-term--activate ((_backend (eql ghostel)) buf dir cmd)
@@ -233,23 +193,6 @@ quoting, not just a program name).")
         ;; multi-word command string must be wrapped — see `baton-term--shell'.
         (ghostel-exec buf baton-term--shell (list "-c" cmd))
         (when post-fn (funcall post-fn))))))
-
-(cl-defmethod baton-term--send-string ((_backend (eql ghostel)) buf string)
-  "Send STRING to ghostel terminal in BUF."
-  (with-current-buffer buf
-    (ghostel-send-string string)))
-
-(cl-defmethod baton-term--send-key ((_backend (eql ghostel)) buf key)
-  "Send KEY to ghostel terminal in BUF."
-  (with-current-buffer buf
-    (pcase key
-      ("RET" (ghostel-send-key "return" nil))
-      ("TAB" (ghostel-send-key "tab"    nil))
-      ("ESC" (ghostel-send-key "escape" nil))
-      ("C-c" (ghostel-send-key "c" "ctrl"))
-      ("C-d" (ghostel-send-key "d" "ctrl"))
-      ("C-z" (ghostel-send-key "z" "ctrl"))
-      (_     (ghostel-send-string key)))))
 
 (provide 'baton-term)
 ;;; baton-term.el ends here
