@@ -23,6 +23,8 @@ A hash-table (`eq` test) mapping agent symbols to definition plists. Each plist 
 
 Register new agents with `baton-define-agent`. Three built-in: `claude-code`, `aider`, `codex` (all `:periodic`).
 
+The built-in `claude-code` agent ships one env-function, `baton--claude-code-env`, which adds `CLAUDE_CODE_NO_FLICKER=1` (Claude's fullscreen alt-screen renderer) while `baton-claude-code-fullscreen` is non-nil (default t). The defcustom is read at spawn time. Monet's env-function is appended after it by `baton-add-env-function`.
+
 ## Session Registries
 
 - `baton--sessions` -- hash-table (session name string -> session struct)
