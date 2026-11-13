@@ -6,7 +6,7 @@
 ;;; Commentary:
 ;; Temporary debug tooling, deliberately kept out of the main implementation
 ;; files so it can be dropped wholesale.  Call `baton-toggle-logging' to
-;; trace the spawn/executor/sodagun call paths into the *baton-log* buffer
+;; trace the spawn/executor call paths into the *baton-log* buffer
 ;; via :around advice (the same enable/disable approach as
 ;; `monet-enable-logging').
 ;;
@@ -38,15 +38,9 @@
     baton-executor--teardown
     baton-executor--agent-env
     baton-term-spawn-in-buffer
-    baton-term--activate
-    baton-sodagun--run
-    baton-sodagun--add-worktree
-    baton-sodagun--sandbox-start
-    baton-sodagun--remove-sandbox
-    baton-sodagun--attach-command)
+    baton-term--activate)
   "Functions traced by `baton-toggle-logging'.
-Symbols that are not `fboundp' at enable time (e.g. baton-sodagun when the
-CLI is absent) are skipped silently.")
+Symbols that are not `fboundp' at enable time are skipped silently.")
 
 (defun baton-logging--log (format-string &rest args)
   "Append a timestamped FORMAT-STRING/ARGS line to the log buffer."
