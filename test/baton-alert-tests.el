@@ -31,41 +31,16 @@
       (let ((info (baton-alert--format s)))
         (should (string-match-p "unread output" (plist-get info :body)))))))
 
-(ert-deftest baton-test-alert-register-prepends ()
-  "`baton-alert--register-backend' prepends, giving user backends higher priority."
-  (baton-alert-test-with-clean-state
-    (baton-alert--register-backend 'first-backend
-      :predicate (lambda () nil)
-      :handler (lambda (_t _b) nil))
-    (baton-alert--register-backend 'second-backend
-      :predicate (lambda () nil)
-      :handler (lambda (_t _b) nil))
-    ;; second-backend was registered last and prepended, so it should be first
-    (should (eq 'second-backend (car (baton-alert--backend-names))))))
-
-(ert-deftest baton-test-alert-deregister-removes ()
-  "`baton-alert--deregister-backend' removes the named backend from the registry."
-  (baton-alert-test-with-clean-state
-    (baton-alert--register-backend 'my-backend
-      :predicate (lambda () nil)
-      :handler (lambda (_t _b) nil))
-    (should (memq 'my-backend (baton-alert--backend-names)))
-    (baton-alert--deregister-backend 'my-backend)
-    (should-not (memq 'my-backend (baton-alert--backend-names)))))
-
 (ert-deftest baton-test-alert-dispatch-calls-first-available ()
   "`baton-alert--dispatch' calls the first backend whose predicate returns non-nil."
   (baton-alert-test-with-clean-state
     (let (called-backend)
-      ;; Register via append so we control order explicitly
-      (baton-alert--do-register 'never-matches
-        `(:predicate ,(lambda () nil)
-          :handler ,(lambda (_t _b) (setq called-backend 'never-matches)))
-        t)
-      (baton-alert--do-register 'always-matches
-        `(:predicate ,(lambda () t)
-          :handler ,(lambda (_t _b) (setq called-backend 'always-matches)))
-        t)
+      (baton-alert--register 'never-matches
+        :predicate (lambda () nil)
+        :handler (lambda (_t _b) (setq called-backend 'never-matches)))
+      (baton-alert--register 'always-matches
+        :predicate (lambda () t)
+        :handler (lambda (_t _b) (setq called-backend 'always-matches)))
       (let ((s (baton-session-create :agent 'claude-code :command "claude"
                                       :directory "/tmp")))
         (baton-alert--dispatch s)
@@ -75,14 +50,12 @@
   "`baton-alert--dispatch' does not call a backend after the first matching one."
   (baton-alert-test-with-clean-state
     (let ((call-count 0))
-      (baton-alert--do-register 'backend-a
-        `(:predicate ,(lambda () t)
-          :handler ,(lambda (_t _b) (cl-incf call-count)))
-        t)
-      (baton-alert--do-register 'backend-b
-        `(:predicate ,(lambda () t)
-          :handler ,(lambda (_t _b) (cl-incf call-count)))
-        t)
+      (baton-alert--register 'backend-a
+        :predicate (lambda () t)
+        :handler (lambda (_t _b) (cl-incf call-count)))
+      (baton-alert--register 'backend-b
+        :predicate (lambda () t)
+        :handler (lambda (_t _b) (cl-incf call-count)))
       (let ((s (baton-session-create :agent 'claude-code :command "claude"
                                       :directory "/tmp")))
         (baton-alert--dispatch s)
@@ -91,10 +64,9 @@
 (ert-deftest baton-test-alert-dispatch-no-match-no-error ()
   "`baton-alert--dispatch' does nothing when no predicate returns non-nil."
   (baton-alert-test-with-clean-state
-    (baton-alert--do-register 'never-fires
-      `(:predicate ,(lambda () nil)
-        :handler ,(lambda (_t _b) (error "Should not fire")))
-      t)
+    (baton-alert--register 'never-fires
+      :predicate (lambda () nil)
+      :handler (lambda (_t _b) (error "Should not fire")))
     (let ((s (baton-session-create :agent 'claude-code :command "claude"
                                     :directory "/tmp")))
       ;; Should complete without error

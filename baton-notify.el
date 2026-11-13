@@ -130,7 +130,7 @@ waiting or in error.  Markers are controlled by `baton-marker-waiting',
                                 (when (> other       0) (format "%d%s" other       baton-marker-other))
                                 (when (> idle        0) (format "%d%s" idle        baton-marker-idle))
                                 (when (> running     0) (format "%d%s" running     baton-marker-running)))))
-             (counts (mapconcat #'identity parts "/"))
+             (counts (string-join parts "/"))
              (unread-str (if (> unread 0) (format " %d%s" unread baton-marker-unread) ""))
              (str (format " B[%s%s]" counts unread-str))
              (face (if (zerop (+ waiting error-count)) 'mode-line 'baton-face-modeline-alert))
@@ -158,10 +158,6 @@ waiting or in error.  Markers are controlled by `baton-marker-waiting',
     (setq global-mode-string
           (delete baton--modeline-segment global-mode-string))
     (force-mode-line-update t)))
-
-(defun baton-notify--update-modeline (&rest _)
-  "Refresh the modeline."
-  (force-mode-line-update t))
 
 (defcustom baton-notify-delay 5
   "Seconds to wait after a session needs attention before sending a notification."
@@ -318,7 +314,7 @@ Returns non-nil if the notification was fired."
 
 (defvar baton-list-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "m")   #'baton-list-mark)
+    (define-key map (kbd "m")   #'baton-list-flag-delete)
     (define-key map (kbd "u")   #'baton-list-unmark)
     (define-key map (kbd "U")   #'baton-list-unmark-all)
     (define-key map (kbd "d")   #'baton-list-flag-delete)
@@ -371,11 +367,6 @@ Returns non-nil if the notification was fired."
     (baton-list-refresh)
     (forward-line 1)))
 
-(defun baton-list-mark ()
-  "Mark the session at point."
-  (interactive)
-  (baton-list-flag-delete))
-
 (defun baton-list-unmark ()
   "Remove mark from the session at point."
   (interactive)
@@ -412,11 +403,9 @@ Returns non-nil if the notification was fired."
 
 ;;; baton-jump (completing-read navigation)
 
-(defun baton--jump-annotation (name sessions)
-  "Return an annotation string for session NAME from SESSIONS list."
-  (when-let* ((session (cl-find name sessions
-                                :key #'baton--session-name
-                                :test #'equal)))
+(defun baton--jump-annotation (name)
+  "Return an annotation string for session NAME."
+  (when-let* ((session (baton-session-get name)))
     (let ((status (baton--session-status session))
           (reason (baton--session-waiting-reason session)))
       (format "  [%s%s]"
@@ -430,12 +419,9 @@ SESSIONS defaults to all sessions."
   (let* ((all (or sessions (baton-session-list)))
          (names (mapcar #'baton--session-name all))
          (completion-extra-properties
-          (list :annotation-function
-                (lambda (n) (baton--jump-annotation n all))))
+          (list :annotation-function #'baton--jump-annotation))
          (chosen (completing-read "Jump to agent: " names nil t)))
-    (when-let* ((session (cl-find chosen all
-                                  :key #'baton--session-name
-                                  :test #'equal))
+    (when-let* ((session (baton-session-get chosen))
                 (buf (baton--session-buffer session)))
       (if (buffer-live-p buf)
           (pop-to-buffer buf)

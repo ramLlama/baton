@@ -18,6 +18,11 @@ LOAD_PATHS := -L . \
               $(if $(MONET_DIR),-L $(MONET_DIR)) \
               $(if $(VTERM_DIR),-L $(VTERM_DIR))
 
+# package-initialize prepends installed packages to load-path, which would
+# shadow this checkout with an installed baton; put the checkout back first.
+PACKAGE_INIT := --eval "(package-initialize)" \
+                --eval "(push (expand-file-name \".\") load-path)"
+
 EL_FILES := $(filter-out baton-autoloads.el,$(wildcard *.el))
 
 MATCH ?=
@@ -36,7 +41,7 @@ TEST_FILES := test/baton-test-helpers.el \
 checkdoc:
 	for FILE in $(EL_FILES) $(TEST_FILES); do \
 	  $(EMACS) --batch $(LOAD_PATHS) \
-	    --eval "(package-initialize)" \
+	    $(PACKAGE_INIT) \
 	    --eval "(setq sentence-end-double-space nil)" \
 	    --eval "(checkdoc-file \"$$FILE\")" 2>&1 \
 	    | grep -v "should be imperative" || true ; \
@@ -44,7 +49,7 @@ checkdoc:
 
 test: compile
 	$(EMACS) --batch $(LOAD_PATHS) \
-	  --eval "(package-initialize)" \
+	  $(PACKAGE_INIT) \
 	  -l ert \
 	  -l baton-session.el \
 	  -l baton-executor.el \
@@ -59,7 +64,7 @@ test: compile
 
 compile: clean
 	$(EMACS) --batch $(LOAD_PATHS) \
-	  --eval "(package-initialize)" \
+	  $(PACKAGE_INIT) \
 	  --eval "(setq sentence-end-double-space nil)" \
 	  --eval "(package-generate-autoloads \"baton\" \".\")" \
 	  -f batch-byte-compile $(EL_FILES) 2>&1 | grep -v "vterm" || true

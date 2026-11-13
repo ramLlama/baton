@@ -111,15 +111,6 @@
       (baton-session-set-status s 'running)
       (should (null (baton--session-waiting-reason s))))))
 
-(ert-deftest baton-test-session-find-by-directory ()
-  "`baton-session-find-by-directory' returns matching session."
-  (baton-test-with-clean-state
-    (let ((s (baton-session-create :agent 'claude-code
-                                    :command "claude"
-                                    :directory "/my/project")))
-      (should (eq s (baton-session-find-by-directory "/my/project")))
-      (should (null (baton-session-find-by-directory "/other"))))))
-
 (ert-deftest baton-test-session-kill-removes-from-registry ()
   "`baton-session-kill' removes the session from the registry."
   (baton-test-with-clean-state

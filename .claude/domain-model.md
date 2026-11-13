@@ -77,8 +77,8 @@ Built-in backends in priority order:
 3. **`notifications`** -- Emacs built-in D-Bus/Windows notifications; non-macOS, non-SSH
 4. **`echo`** -- echo-area `message`; always available fallback
 
-Key private symbols (double-dash, architected for future promotion to public):
-- `baton-alert--register-backend` / `baton-alert--deregister-backend` -- manage user backends
+Key private symbols:
+- `baton-alert--register` -- appends a backend (or replaces one by name)
 - `baton-alert--dispatch` -- installed as `baton-notify-function` by `baton-alert--setup`
 - `baton-alert--format` -- builds `(:title :body :icon)` plist from a session
 - `baton-alert--sanitize-terminal` -- strips control characters for safe OSC 777 injection

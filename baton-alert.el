@@ -46,45 +46,13 @@ Nil when the file cannot be located at load time.")
 
 ;;; Internal helpers
 
-(defun baton-alert--do-register (name plist append-p)
-  "Register backend NAME with PLIST, appending if APPEND-P, prepending otherwise.
+(defun baton-alert--register (name &rest plist)
+  "Register backend NAME with PLIST at the end of `baton-alert--backends'.
 Replaces any existing entry with the same NAME in place."
-  (let ((existing (assq name baton-alert--backends)))
-    (if existing
-        (setcdr existing plist)
-      (if append-p
-          (setq baton-alert--backends
-                (append baton-alert--backends (list (cons name plist))))
-        (push (cons name plist) baton-alert--backends)))))
-
-(defun baton-alert--register-builtin (name &rest plist)
-  "Register built-in backend NAME with PLIST.
-Built-in backends are appended, giving user-registered backends
-higher priority."
-  (baton-alert--do-register name plist t))
-
-;;; Private API (architected for future promotion to public)
-
-(defun baton-alert--register-backend (name &rest plist)
-  "Register a user alert backend named NAME.
-PLIST must contain :predicate and :handler.
-:predicate is a zero-argument function returning non-nil when the backend
-is available.
-:handler is a function called with TITLE and BODY strings.
-User backends are prepended, giving them priority over built-in backends.
-If NAME is already registered, the existing entry is updated in place."
-  (baton-alert--do-register name plist nil))
-
-(defun baton-alert--deregister-backend (name)
-  "Remove the backend named NAME from the registry.
-No-op if NAME is not registered."
-  (setq baton-alert--backends
-        (cl-remove-if (lambda (e) (eq (car e) name))
-                      baton-alert--backends)))
-
-(defun baton-alert--backend-names ()
-  "Return a list of registered backend name symbols in dispatch order."
-  (mapcar #'car baton-alert--backends))
+  (if-let* ((existing (assq name baton-alert--backends)))
+      (setcdr existing plist)
+    (setq baton-alert--backends
+          (append baton-alert--backends (list (cons name plist))))))
 
 (defun baton-alert--format (session)
   "Return a plist (:title TITLE :body BODY :icon ICON) for SESSION."
@@ -123,7 +91,7 @@ Called automatically by `baton-mode'.  Safe to call multiple times."
 ;; the final list is: alerter → osc777 → notifications → echo.
 
 ;; 1. macOS alerter: requires `alerter' CLI, disabled over SSH
-(baton-alert--register-builtin
+(baton-alert--register
  'alerter
  :predicate (lambda ()
               (and (eq system-type 'darwin)
@@ -138,7 +106,7 @@ Called automatically by `baton-mode'.  Safe to call multiple times."
               (inheritenv (apply #'start-process "baton-alerter" nil "alerter" args)))))
 
 ;; 2. OSC 777: terminal escape for SSH sessions
-(baton-alert--register-builtin
+(baton-alert--register
  'osc777
  :predicate (lambda ()
               (or (getenv "SSH_CLIENT") (getenv "SSH_TTY")))
@@ -149,7 +117,7 @@ Called automatically by `baton-mode'.  Safe to call multiple times."
                      (baton-alert--sanitize-terminal body)))))
 
 ;; 3. Emacs built-in desktop notifications (Linux/Windows via D-Bus or toast)
-(baton-alert--register-builtin
+(baton-alert--register
  'notifications
  :predicate (lambda ()
               (and (not (eq system-type 'darwin))
@@ -163,7 +131,7 @@ Called automatically by `baton-mode'.  Safe to call multiple times."
               (apply #'notifications-notify args))))
 
 ;; 4. Echo area: always available fallback
-(baton-alert--register-builtin
+(baton-alert--register
  'echo
  :predicate (lambda () t)
  :handler (lambda (title body)
