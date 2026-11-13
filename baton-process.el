@@ -59,6 +59,9 @@ then launched in the configured terminal backend.  The buffer is named
          (extra-env (plist-get resolved :extra-env))
          (buf-name (format "*baton:%s*" (baton--session-name session)))
          (buf (get-buffer-create buf-name)))
+    ;; Set before the terminal spawns so a failed spawn's session kill
+    ;; also kills the buffer.
+    (setf (baton--session-buffer session) buf)
     ;; Capture the calling buffer's process-environment (buffer-local when
     ;; envrc.el/direnv manages it), prepend extra-env, and install the result
     ;; as the DEFAULT value for the duration of the spawn: the terminal buffer
@@ -77,7 +80,6 @@ then launched in the configured terminal backend.  The buffer is named
         (add-hook 'pre-command-hook #'baton-process--on-input nil t)
         ;; Remove session from registry if the buffer is killed externally
         (add-hook 'kill-buffer-hook #'baton-process--on-buffer-killed nil t)))
-    (setf (baton--session-buffer session) buf)
     ;; Initialize watcher metadata
     (let ((now (float-time)))
       (setf (baton--session-metadata session)
@@ -192,8 +194,13 @@ sessions; does not call the status function for :on-event sessions."
         (when-let* ((timer (plist-get (baton--session-metadata session) :watcher-timer)))
           (cancel-timer timer))
       ;; Buffer alive — derive state from observation
-      (let* ((text (baton-process--buffer-tail buf))
-             (current-hash (md5 text))
+      (let* ((agent-def (and (boundp 'baton-agents)
+                             (gethash (baton--session-agent session) baton-agents)))
+             (ignore-re (plist-get agent-def :output-ignore-regexp))
+             (text (baton-process--buffer-tail buf))
+             (current-hash (md5 (if ignore-re
+                                    (replace-regexp-in-string ignore-re "" text)
+                                  text)))
              (meta (baton--session-metadata session))
              (last-hash (or (plist-get meta :last-output-hash) ""))
              (last-time (or (plist-get meta :last-output-time) (float-time)))
@@ -211,10 +218,7 @@ sessions; does not call the status function for :on-event sessions."
          (hash-changed
           (baton-process--tick-set-status session 'running nil))
          ((>= (- now last-time) baton-process--quiet-threshold)
-          (let* ((agent-sym (baton--session-agent session))
-                 (agent-def (and (boundp 'baton-agents)
-                                 (gethash agent-sym baton-agents)))
-                 (status-fn  (and agent-def (plist-get agent-def :status-function)))
+          (let* ((status-fn  (and agent-def (plist-get agent-def :status-function)))
                  (trigger    (and agent-def (plist-get agent-def :status-function-trigger)))
                  (raw-result (when (and status-fn (eq trigger :periodic))
                                (funcall status-fn session)))

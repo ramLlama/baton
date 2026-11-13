@@ -44,12 +44,13 @@
 (defvar baton-agents (make-hash-table :test 'eq)
   "Hash table mapping agent symbols to their definition plists.
 Each plist has keys: :command, :args, :status-function,
-:status-function-trigger, :env-functions.")
+:status-function-trigger, :env-functions, :output-ignore-regexp.")
 
 (cl-defun baton-define-agent (&key name command (args nil)
                                (status-function nil)
                                status-function-trigger
-                               (env-functions nil))
+                               (env-functions nil)
+                               (output-ignore-regexp nil))
   "Define or redefine an agent.
 NAME is a symbol (e.g. `claude-code').
 COMMAND is the shell command string.
@@ -64,7 +65,10 @@ by external events (e.g., hook handlers) and the watcher never calls it.
 ENV-FUNCTIONS is a list of functions (KEY DIRECTORY) -> plist
 \(:env STRINGS :ports PORTS) where STRINGS is a list of \"VAR=VALUE\"
 assignments and PORTS lists host ports the agent process must be able to
-reach (so sandboxed executors can forward them).  Default: nil."
+reach (so sandboxed executors can forward them).  Default: nil.
+OUTPUT-IGNORE-REGEXP, when non-nil, matches cosmetic output (such as a
+blinking glyph) that the output watcher strips before deciding whether
+output changed, so it does not count as the agent running.  Default: nil."
   (unless (memq status-function-trigger '(:periodic :on-event))
     (error "baton-define-agent: :status-function-trigger must be `:periodic' or `:on-event', got %S"
            status-function-trigger))
@@ -73,7 +77,8 @@ reach (so sandboxed executors can forward them).  Default: nil."
                  :args args
                  :status-function status-function
                  :status-function-trigger status-function-trigger
-                 :env-functions env-functions)
+                 :env-functions env-functions
+                 :output-ignore-regexp output-ignore-regexp)
            baton-agents))
 
 (defun baton-add-env-function (agent fn)
@@ -125,10 +130,16 @@ Delivered as an env-function so sandboxed executors pass it to the guest."
  :args '()
  :env-functions (list #'baton--claude-code-env)
  :status-function-trigger :periodic
+ ;; Claude blinks a status glyph in front of a pending tool call, in place
+ ;; of the two-space indent, for as long as its permission prompt is open.
+ ;; The space alternative is the glyph's off frame (it also strips other
+ ;; two-space indents, which is harmless for change detection).
+ :output-ignore-regexp "^[●⏺ ] "
  ;; Patterns are matched against the last 250 lines — keep them specific.
+ ;; The input prompt is deliberately unmatched: a finished turn is `idle',
+ ;; as with monet's hook-driven status (Stop → idle).
  :status-function (baton-process-make-regex-status-function
-                   '(("╭─" . (waiting . "input prompt"))
-                     ("Allow.*tool\\|Allow.*command\\|Bash.*Allow" . (waiting . "permission prompt"))
+                   '(("Allow.*tool\\|Allow.*command\\|Bash.*Allow" . (waiting . "permission prompt"))
                      ("Do you want to\\|Would you like to" . (waiting . "confirmation"))
                      ("\\[Y/n\\]\\|\\[y/N\\]" . (waiting . "confirmation")))))
 
@@ -299,7 +310,12 @@ prompt is shown unless a prefix argument is given."
               (list :sodagun-branch worktree
                     :sodagun-base base
                     :sodagun-config (and config (expand-file-name config)))))
-      (baton-process-spawn session)
+      ;; The session is registered before spawn; a failed spawn would
+      ;; otherwise leave it behind with no buffer.
+      (condition-case err
+          (baton-process-spawn session)
+        (error (baton-session-kill session)
+               (signal (car err) (cdr err))))
       (when-let* ((buf (baton--session-buffer session)))
         (pop-to-buffer buf))
       session)))
